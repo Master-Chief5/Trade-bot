@@ -1,18 +1,34 @@
-// Signal generation. Uses Claude (official SDK + structured outputs) when an
-// ANTHROPIC_API_KEY is set; otherwise falls back to a local technical-analysis
-// heuristic so the app is fully functional offline.
-import Anthropic from '@anthropic-ai/sdk';
+// Signal generation. Uses Claude via the Anthropic Messages API when the user
+// has saved an API key in Settings; otherwise falls back to a local
+// technical-analysis heuristic so the app is fully functional offline.
+//
+// This is a zero-build static page (also packaged into the Android WebView),
+// so it calls the REST API with fetch rather than the npm SDK. The
+// anthropic-dangerous-direct-browser-access header opts in to CORS; the key is
+// the user's own, entered on-device and stored only in localStorage.
+import { getApiKey } from './store.js';
 
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
+const MODEL = 'claude-opus-4-8';
+const API_URL = 'https://api.anthropic.com/v1/messages';
 
-let _client;
 export function hasClaudeKey() {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return !!getApiKey();
 }
-function getClient() {
-  if (!hasClaudeKey()) return null;
-  if (!_client) _client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
-  return _client;
+
+async function claudeRequest(body) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': getApiKey(),
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({ model: MODEL, max_tokens: 1024, ...body }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error?.message || `API error ${res.status}`);
+  return data;
 }
 
 const SYSTEM_PROMPT = `You are an expert day trader using ICT (Inner Circle Trader) Smart Money Concepts.
@@ -36,8 +52,7 @@ const SIGNAL_SCHEMA = {
 };
 
 export async function analyzeWithClaude(symbol, candles) {
-  const client = getClient();
-  if (!client) throw new Error('No API key');
+  if (!hasClaudeKey()) throw new Error('No API key');
   const recent = candles.slice(-60).map((c) => [
     +c.o.toFixed(6), +c.h.toFixed(6), +c.l.toFixed(6), +c.c.toFixed(6),
   ]);
@@ -47,9 +62,7 @@ export async function analyzeWithClaude(symbol, candles) {
     `Recent 1m candles as [open, high, low, close], oldest first:\n` +
     JSON.stringify(recent);
 
-  const resp = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
+  const resp = await claudeRequest({
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userText }],
     output_config: { format: { type: 'json_schema', schema: SIGNAL_SCHEMA } },
@@ -133,12 +146,9 @@ export function analyzeHeuristic(symbol, candles) {
 
 // --- Optional news sentiment via web search --------------------------------
 export async function analyzeNews(symbol) {
-  const client = getClient();
-  if (!client) return { sentiment: 'NEUTRAL', summary: 'News disabled (no API key).' };
+  if (!hasClaudeKey()) return { sentiment: 'NEUTRAL', summary: 'News disabled (no API key).' };
   try {
-    const resp = await client.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
+    const resp = await claudeRequest({
       system:
         'You are a crypto markets news analyst. Use web search to find news from the last few hours about the given asset, plus any major macro/regulatory events today. Be concise.',
       messages: [{

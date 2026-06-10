@@ -1,6 +1,6 @@
 // Live crypto candles with a graceful offline simulator fallback.
 // Tries Binance, then Coinbase. If both are unreachable (e.g. a locked-down
-// sandbox), it generates a believable random-walk market so the app still runs.
+// network), it generates a believable random-walk market so the app still runs.
 import { getState, saveState } from './store.js';
 
 const SYMBOLS = {
@@ -34,10 +34,7 @@ async function fetchCoinbase(sym) {
   if (!map) return null;
   // Coinbase Exchange: [time(s), low, high, open, close, volume], newest first.
   const url = `https://api.exchange.coinbase.com/products/${map.coinbase}/candles?granularity=60`;
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-    headers: { 'User-Agent': 'crypto-paper-trader' },
-  });
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!res.ok) return null;
   const rows = await res.json();
   if (!Array.isArray(rows)) return null;

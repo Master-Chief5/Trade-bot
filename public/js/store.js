@@ -1,11 +1,19 @@
-// Tiny JSON-file-backed state store. No native deps, survives restarts.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Browser-side state store backed by localStorage. Same state shape as the
+// original server version so the rest of the engine ports over unchanged.
+const STATE_KEY = 'cpt_state_v1';
+const API_KEY_KEY = 'cpt_anthropic_key';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const STATE_FILE = path.join(DATA_DIR, 'state.json');
+// Node (used for smoke tests) has no localStorage — fall back to an in-memory shim.
+const storage = typeof localStorage !== 'undefined'
+  ? localStorage
+  : (() => {
+      const m = new Map();
+      return {
+        getItem: (k) => (m.has(k) ? m.get(k) : null),
+        setItem: (k, v) => m.set(k, String(v)),
+        removeItem: (k) => m.delete(k),
+      };
+    })();
 
 export const DEFAULT_CONFIG = {
   symbol: 'BTC',
@@ -38,8 +46,9 @@ let state;
 
 export function loadState() {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    const raw = storage.getItem(STATE_KEY);
+    if (raw) {
+      state = JSON.parse(raw);
       state.config = { ...DEFAULT_CONFIG, ...state.config };
     } else {
       state = freshState();
@@ -56,18 +65,13 @@ export function getState() {
   return state;
 }
 
-let saveTimer = null;
 export function saveState() {
-  if (!state || saveTimer) return; // debounce burst writes
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    try {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-    } catch (err) {
-      console.error('Failed to save state:', err.message);
-    }
-  }, 250);
+  if (!state) return;
+  try {
+    storage.setItem(STATE_KEY, JSON.stringify(state));
+  } catch (err) {
+    console.error('Failed to save state:', err.message);
+  }
 }
 
 // Reset the paper portfolio to a (possibly new) starting balance and clear history.
@@ -86,4 +90,15 @@ export function resetPortfolio(startingBalance) {
   s.latest = null;
   saveState();
   return s;
+}
+
+// The Anthropic API key lives outside the state blob, on this device only.
+export function getApiKey() {
+  return storage.getItem(API_KEY_KEY) || '';
+}
+
+export function setApiKey(key) {
+  const k = (key || '').trim();
+  if (k) storage.setItem(API_KEY_KEY, k);
+  else storage.removeItem(API_KEY_KEY);
 }

@@ -1,3 +1,7 @@
+import { getState, saveState, resetPortfolio, getApiKey, setApiKey } from './js/store.js';
+import { supportedSymbols } from './js/marketData.js';
+import { runCycle, reschedule, getStateView } from './js/engine.js';
+
 const $ = (id) => document.getElementById(id);
 let lastState = null;
 let editingFields = false; // pause input overwrites while user types
@@ -6,15 +10,6 @@ const fmt = (n, d = 2) =>
   (n < 0 ? '-' : '') + '$' + Math.abs(Number(n)).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 const fmtNum = (n, d) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
 const signClass = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : 'flat');
-
-async function api(path, method = 'GET', body) {
-  const res = await fetch(path, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return res.json();
-}
 
 function toast(msg) {
   const t = $('toast');
@@ -78,6 +73,7 @@ function render(s) {
     $('confidenceThreshold').value = s.config.confidenceThreshold;
     $('pollIntervalSec').value = s.config.pollIntervalSec;
     $('useNews').checked = s.config.useNews;
+    if (document.activeElement !== $('apiKey')) $('apiKey').value = getApiKey();
     buildSymbols(s);
   }
 
@@ -176,44 +172,56 @@ function drawChart(candles) {
 // --- Actions ---------------------------------------------------------------
 $('analyzeBtn').addEventListener('click', async () => {
   $('analyzeBtn').textContent = 'Checking…';
-  render(await api('/api/analyze', 'POST', {}));
+  render(await runCycle());
   $('analyzeBtn').textContent = 'Check now';
 });
 
-$('saveBtn').addEventListener('click', async () => {
-  const body = {
-    symbol: $('symbol').value,
+$('saveBtn').addEventListener('click', () => {
+  const s = getState();
+  const nums = {
     tradeAmount: +$('tradeAmount').value,
     confidenceThreshold: +$('confidenceThreshold').value,
     pollIntervalSec: +$('pollIntervalSec').value,
-    useNews: $('useNews').checked,
   };
+  for (const [k, v] of Object.entries(nums)) {
+    if (Number.isFinite(v) && v >= 0) s.config[k] = v;
+  }
+  const sym = $('symbol').value;
+  if (supportedSymbols().includes(sym)) s.config.symbol = sym;
+  s.config.useNews = $('useNews').checked;
+  setApiKey($('apiKey').value);
+  saveState();
   editingFields = false;
-  render(await api('/api/config', 'POST', body));
+  reschedule();
+  render(getStateView());
   toast('Settings saved');
 });
 
-$('resetBtn').addEventListener('click', async () => {
+$('resetBtn').addEventListener('click', () => {
   const bal = +$('startingBalance').value;
   if (!(bal > 0)) return toast('Enter an amount above 0');
-  render(await api('/api/reset', 'POST', { startingBalance: bal }));
+  resetPortfolio(bal);
+  render(getStateView());
   toast(`Reset — watching with ${fmt(bal, 0)}`);
 });
 
-$('autoToggle').addEventListener('click', async () => {
-  const enabled = !(lastState && lastState.autoMode);
-  render(await api('/api/auto', 'POST', { enabled }));
-  toast(enabled ? 'Auto-watch ON' : 'Auto-watch OFF');
+$('autoToggle').addEventListener('click', () => {
+  const s = getState();
+  s.config.autoMode = !s.config.autoMode;
+  saveState();
+  reschedule();
+  render(getStateView());
+  toast(s.config.autoMode ? 'Auto-watch ON' : 'Auto-watch OFF');
 });
 
-['startingBalance', 'tradeAmount', 'confidenceThreshold', 'pollIntervalSec'].forEach((id) => {
+['startingBalance', 'tradeAmount', 'confidenceThreshold', 'pollIntervalSec', 'apiKey'].forEach((id) => {
   $(id).addEventListener('focus', () => (editingFields = true));
   $(id).addEventListener('blur', () => (editingFields = false));
 });
 
-// --- Poll loop -------------------------------------------------------------
-async function tick() {
-  try { render(await api('/api/state')); } catch { /* ignore transient */ }
-}
+// --- Boot --------------------------------------------------------------------
+$('apiKey').value = getApiKey();
+reschedule(); // resumes Auto-watch if it was left ON last time
+function tick() { render(getStateView()); }
 tick();
 setInterval(tick, 3000);

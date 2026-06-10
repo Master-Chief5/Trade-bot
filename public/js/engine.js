@@ -1,0 +1,95 @@
+// The watch-cycle "brain" — what src/server.js used to run on the backend, now
+// running entirely in the page so the app works standalone (including as the
+// Android app, with no computer involved).
+import { getState, saveState } from './store.js';
+import { getMarket, supportedSymbols } from './marketData.js';
+import {
+  analyzeWithClaude, analyzeHeuristic, analyzeNews, combineDecision, hasClaudeKey,
+} from './analyzer.js';
+import { applyDecision, portfolioView } from './paperEngine.js';
+
+// --- Core watch cycle ------------------------------------------------------
+let cycleRunning = false;
+export async function runCycle() {
+  if (cycleRunning) return getStateView();
+  cycleRunning = true;
+  try {
+    const s = getState();
+    const sym = s.config.symbol;
+    const { candles, source } = await getMarket(sym);
+    const price = candles[candles.length - 1].c;
+
+    let chart, analyzerSource;
+    if (hasClaudeKey()) {
+      try {
+        chart = await analyzeWithClaude(sym, candles);
+        analyzerSource = 'claude';
+      } catch (err) {
+        chart = analyzeHeuristic(sym, candles);
+        analyzerSource = `heuristic (Claude error: ${err.message})`;
+      }
+    } else {
+      chart = analyzeHeuristic(sym, candles);
+      analyzerSource = 'heuristic';
+    }
+
+    let sentiment = 'NEUTRAL', newsSummary = null;
+    if (s.config.useNews && hasClaudeKey()) {
+      const news = await analyzeNews(sym);
+      sentiment = news.sentiment;
+      newsSummary = news.summary;
+    }
+
+    const finalSignal = combineDecision(chart.signal, sentiment, s.config.useNews);
+    applyDecision(s, { finalSignal, chart, sentiment, price, dataSource: source, analyzerSource, newsSummary });
+
+    s.marketState[sym] = s.marketState[sym] || {};
+    s.marketState[sym].candles = candles.slice(-150);
+    s.marketState[sym].lastPrice = price;
+    s.marketState[sym].source = source;
+    saveState();
+  } catch (err) {
+    console.error('Cycle error:', err.message);
+  } finally {
+    cycleRunning = false;
+  }
+  return getStateView();
+}
+
+// --- Auto-mode scheduler ----------------------------------------------------
+// Runs while the app is open; there is no server, so closing the app pauses
+// the watch loop until it's opened again.
+let pollTimer = null;
+export function reschedule() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  const s = getState();
+  if (s.config.autoMode) {
+    const sec = Math.max(10, Number(s.config.pollIntervalSec) || 60);
+    pollTimer = setInterval(runCycle, sec * 1000);
+    runCycle(); // fire one immediately
+  }
+}
+
+// --- View assembly -----------------------------------------------------------
+export function getStateView() {
+  const s = getState();
+  const sym = s.config.symbol;
+  const ms = s.marketState[sym] || {};
+  const candles = ms.candles || [];
+  const price = candles.length ? candles[candles.length - 1].c : (ms.lastPrice || 0);
+  return {
+    paperMode: true,
+    hasClaudeKey: hasClaudeKey(),
+    config: s.config,
+    dataSource: ms.source || 'none',
+    analyzerSource: hasClaudeKey() ? 'claude' : 'heuristic',
+    price,
+    latest: s.latest,
+    portfolio: portfolioView(s, price),
+    candles: candles.map((c) => ({ t: c.t, c: c.c })),
+    trades: s.trades.slice(0, 100),
+    symbols: supportedSymbols(),
+    autoMode: s.config.autoMode,
+  };
+}

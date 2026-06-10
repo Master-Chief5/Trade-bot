@@ -87,6 +87,10 @@
       <div class="field checkbox">
         <label><input id="useNews" type="checkbox" /> Use news sentiment (needs API key)</label>
       </div>
+      <div class="field">
+        <label>Claude API key (optional — enables Claude analysis; stays on this device)</label>
+        <input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off" />
+      </div>
       <div class="row">
         <button id="saveBtn" class="btn">Save settings</button>
         <button id="analyzeBtn" class="btn primary">Check now</button>
@@ -124,6 +128,6 @@
   </footer>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

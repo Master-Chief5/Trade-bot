@@ -1,0 +1,60 @@
+name: android-apk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The android/ project is not committed — generate it fresh from the
+      # Capacitor template (versions pinned by package-lock.json).
+      - name: Generate Android project
+        run: npx cap add android
+
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug --no-daemon
+
+      - name: Collect APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk crypto-paper-trader.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crypto-paper-trader-apk
+          path: crypto-paper-trader.apk
+
+      - name: Publish APK to the "apk-latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Crypto Paper Trader — Android APK
+          body: |
+            Latest Android APK built automatically from `main`.
+
+            **Install:** download `crypto-paper-trader.apk` below on your phone, open it,
+            and allow installing from your browser when Android asks ("install unknown apps").
+            It's a debug-signed build for personal use, so Android may show an extra warning — that's expected.
+
+            Paper trading only — no real orders, ever.
+          files: crypto-paper-trader.apk
+          make_latest: true

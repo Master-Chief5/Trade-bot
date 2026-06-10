@@ -1,0 +1,13 @@
+{
+  "appId": "com.masterchief5.cryptopapertrader",
+  "appName": "Crypto Paper Trader",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
