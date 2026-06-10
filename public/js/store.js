@@ -1,6 +1,6 @@
 // Browser-side state store backed by localStorage. Same state shape as the
 // original server version so the rest of the engine ports over unchanged.
-const STATE_KEY = 'cpt_state_v1';
+const STATE_KEY = 'cpt_state_v2'; // v2: live-by-default settings
 const API_KEY_KEY = 'cpt_anthropic_key';
 
 // Node (used for smoke tests) has no localStorage — fall back to an in-memory shim.
@@ -20,10 +20,10 @@ export const DEFAULT_CONFIG = {
   startingBalance: 500,      // the amount you tell it you have
   tradeAmount: 50,           // $ per simulated buy (when autoSize is off)
   autoSize: true,            // let the bot size each buy from its confidence
-  confidenceThreshold: 70,   // min analyzer confidence to act
+  confidenceThreshold: 60,   // min analyzer confidence to act
   pollIntervalSec: 15,       // how often auto-mode checks the market (min 5)
-  cooldownMinutes: 5,        // min gap between trades
-  autoMode: false,           // off by default (no surprise API spend)
+  cooldownMinutes: 1,        // min gap between trades
+  autoMode: true,            // watching starts as soon as the app opens
   useNews: false,            // optional web-search sentiment (needs API key)
 };
 
@@ -66,13 +66,19 @@ export function getState() {
   return state;
 }
 
+let saveTimer = null;
 export function saveState() {
-  if (!state) return;
-  try {
-    storage.setItem(STATE_KEY, JSON.stringify(state));
-  } catch (err) {
-    console.error('Failed to save state:', err.message);
-  }
+  // Live price ticks call this several times a second — collapse bursts into
+  // one trailing write so older phones aren't stringifying state constantly.
+  if (!state || saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      storage.setItem(STATE_KEY, JSON.stringify(state));
+    } catch (err) {
+      console.error('Failed to save state:', err.message);
+    }
+  }, 300);
 }
 
 // Reset the paper portfolio to a (possibly new) starting balance and clear history.

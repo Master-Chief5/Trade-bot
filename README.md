@@ -93,7 +93,8 @@ API key into **Setup → Claude API key** and hit "Save settings".
 - **Use news sentiment** — adds a Claude web-search sentiment pass (needs API key).
 - **Claude API key** — optional; stays on this device.
 - **Check now** — run one analysis cycle immediately.
-- **Auto-watch ON/OFF** — start/stop the watch loop. Off by default.
+- **Auto-watch ON/OFF** — the watch loop. **On by default** — the app starts
+  watching the moment you open it.
 
 ## How a decision is made
 
@@ -101,9 +102,9 @@ API key into **Setup → Claude API key** and hit "Save settings".
 2. Analyzer (Claude or the local heuristic) returns
    `{ signal: BUY/SELL/HOLD, confidence: 0-100, reasoning, setup_type }`.
 3. If news is on: combine with sentiment (BUY+NEGATIVE → HOLD, SELL+POSITIVE → HOLD).
-4. Paper engine executes the (simulated) trade if confidence ≥ threshold, not in
-   cooldown (5 min between trades), and the position rules allow it
-   (one position at a time; BUY opens it, SELL closes it).
+4. Paper engine executes the (simulated) trade if confidence ≥ threshold
+   (default 60), not in cooldown (1 min between trades by default), and the
+   position rules allow it (one position at a time; BUY opens it, SELL closes it).
 
 ## Project layout
 
