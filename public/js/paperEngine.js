@@ -26,7 +26,11 @@ export function applyDecision(state, ctx) {
     else if (inCooldown) note = 'In cooldown.';
     else if (pf.cash < 1) note = 'Out of cash.';
     else {
-      const amount = Math.min(cfg.tradeAmount, pf.cash);
+      // Auto-size: the bot stakes a share of available cash equal to its
+      // confidence (82% confident → 82% of cash). Otherwise: fixed $ amount.
+      const amount = cfg.autoSize
+        ? Math.max(1, Math.min(pf.cash, pf.cash * (chart.confidence / 100)))
+        : Math.min(cfg.tradeAmount, pf.cash);
       const qty = amount / price;
       pf.cash -= amount;
       pf.position = { symbol: cfg.symbol, qty, avgPrice: price };

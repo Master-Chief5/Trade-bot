@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Paper-trading watcher: live crypto data + optional Claude analysis, logging simulated BUY/SELL/HOLD trades against a balance you choose. No real money, no order execution — you copy trades manually if you want. Runs as a web page or an Android app.",
+  "description": "Paper-trading watcher: live crypto + US stock data with real-time price streaming and optional Claude analysis, logging simulated BUY/SELL/HOLD trades against a balance you choose. No real money, no order execution — you copy trades manually if you want. Runs as a web page or an Android app.",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"

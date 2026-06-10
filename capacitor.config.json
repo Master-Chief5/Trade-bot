@@ -1,6 +1,6 @@
 {
   "appId": "com.masterchief5.cryptopapertrader",
-  "appName": "Crypto Paper Trader",
+  "appName": "Paper Trader",
   "webDir": "public",
   "server": {
     "androidScheme": "https"

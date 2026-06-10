@@ -1,10 +1,14 @@
 import { getState, saveState, resetPortfolio, getApiKey, setApiKey } from './js/store.js';
 import { supportedSymbols } from './js/marketData.js';
 import { runCycle, reschedule, getStateView } from './js/engine.js';
+import { onTick } from './js/priceFeed.js';
 
 const $ = (id) => document.getElementById(id);
 let lastState = null;
 let editingFields = false; // pause input overwrites while user types
+let prevPrice = 0;
+let lastTopTradeId; // undefined until first render, then last seen trade id
+let newTradeUntil = 0;
 
 const fmt = (n, d = 2) =>
   (n < 0 ? '-' : '') + '$' + Math.abs(Number(n)).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -36,14 +40,24 @@ function render(s) {
   $('cash').textContent = fmt(p.cash);
   setSigned('realized', p.realizedPnl);
   setSigned('unrealized', p.unrealizedPnl);
-  $('price').textContent = s.price ? fmt(s.price, s.price < 1 ? 5 : 2) : '—';
   $('position').textContent = p.position
     ? `${fmtNum(p.position.qty, 6)} ${p.position.symbol} @ ${fmt(p.position.avgPrice, p.position.avgPrice < 1 ? 5 : 2)}`
     : 'flat';
   $('position').className = 'v';
 
+  // Price, with a flash on every live change
+  const priceEl = $('price');
+  priceEl.textContent = s.price ? fmt(s.price, s.price < 1 ? 5 : 2) : '—';
+  const dir = prevPrice && s.price && s.price !== prevPrice
+    ? (s.price > prevPrice ? 'flash-up' : 'flash-down')
+    : null;
+  priceEl.className = 'v';
+  if (dir) { void priceEl.offsetWidth; priceEl.classList.add(dir); }
+  prevPrice = s.price;
+
   // Source chips
-  $('dataSource').textContent = 'data: ' + s.dataSource;
+  $('dataSource').textContent = 'data: ' + s.dataSource + (s.feedLive ? ' · LIVE' : '');
+  $('dataSource').className = 'chip' + (s.feedLive ? ' chip-live' : '');
   $('analyzerSource').textContent = 'analyzer: ' + (s.hasClaudeKey ? 'Claude' : 'heuristic');
 
   // Current signal
@@ -70,12 +84,14 @@ function render(s) {
   if (!editingFields) {
     if (document.activeElement !== $('startingBalance')) $('startingBalance').value = p.startingBalance;
     $('tradeAmount').value = s.config.tradeAmount;
+    $('autoSize').checked = !!s.config.autoSize;
     $('confidenceThreshold').value = s.config.confidenceThreshold;
     $('pollIntervalSec').value = s.config.pollIntervalSec;
     $('useNews').checked = s.config.useNews;
     if (document.activeElement !== $('apiKey')) $('apiKey').value = getApiKey();
     buildSymbols(s);
   }
+  $('tradeAmount').disabled = !!s.config.autoSize;
 
   // Auto toggle
   const at = $('autoToggle');
@@ -94,30 +110,48 @@ function setSigned(id, v) {
 
 function buildSymbols(s) {
   const sel = $('symbol');
-  if (sel.options.length === (s.symbols || []).length && sel.value === s.config.symbol) return;
+  const flat = s.symbols || [];
+  if (sel.options.length === flat.length && sel.value === s.config.symbol) return;
   sel.innerHTML = '';
-  (s.symbols || []).forEach((sym) => {
-    const o = document.createElement('option');
-    o.value = sym; o.textContent = sym;
-    if (sym === s.config.symbol) o.selected = true;
-    sel.appendChild(o);
-  });
+  const groups = s.symbolGroups || { crypto: flat, stocks: [] };
+  for (const [label, syms] of [['Crypto', groups.crypto], ['Stocks & ETFs', groups.stocks]]) {
+    if (!syms || !syms.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = label;
+    syms.forEach((sym) => {
+      const o = document.createElement('option');
+      o.value = sym; o.textContent = sym;
+      if (sym === s.config.symbol) o.selected = true;
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  }
 }
 
 function renderTrades(trades) {
   $('tradeCount').textContent = trades.length ? `${trades.length} trade${trades.length > 1 ? 's' : ''}` : '';
   const body = $('tradesBody');
   if (!trades.length) {
+    lastTopTradeId = null;
     body.innerHTML = '<tr><td colspan="8" class="empty">No trades yet. Hit “Check now”, or turn on Auto-watch.</td></tr>';
     return;
   }
+
+  // Flash the newest row briefly when a trade just landed.
+  const top = trades[0].id;
+  if (lastTopTradeId !== undefined && lastTopTradeId !== null && top !== lastTopTradeId) {
+    newTradeUntil = Date.now() + 1600;
+  }
+  lastTopTradeId = top;
+  const flashTop = Date.now() < newTradeUntil;
+
   body.innerHTML = trades.map((t, i) => {
     const d = new Date(t.time);
     const time = d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const dec = t.price < 1 ? 5 : 2;
     const pnl = t.realizedPnl == null ? '—'
       : `<span class="${signClass(t.realizedPnl)}">${(t.realizedPnl >= 0 ? '+' : '') + fmt(t.realizedPnl)}</span>`;
-    return `<tr>
+    return `<tr${i === 0 && flashTop ? ' class="new-trade"' : ''}>
       <td>${time}</td>
       <td class="t-${t.action.toLowerCase()}">${t.action}</td>
       <td>${fmtNum(t.qty, 6)} ${t.symbol} <span class="muted">(${fmt(t.amountUsd)})</span></td>
@@ -186,8 +220,10 @@ $('saveBtn').addEventListener('click', () => {
   for (const [k, v] of Object.entries(nums)) {
     if (Number.isFinite(v) && v >= 0) s.config[k] = v;
   }
+  s.config.pollIntervalSec = Math.max(5, s.config.pollIntervalSec || 15);
   const sym = $('symbol').value;
   if (supportedSymbols().includes(sym)) s.config.symbol = sym;
+  s.config.autoSize = $('autoSize').checked;
   s.config.useNews = $('useNews').checked;
   setApiKey($('apiKey').value);
   saveState();
@@ -222,6 +258,17 @@ $('autoToggle').addEventListener('click', () => {
 // --- Boot --------------------------------------------------------------------
 $('apiKey').value = getApiKey();
 reschedule(); // resumes Auto-watch if it was left ON last time
+
 function tick() { render(getStateView()); }
+
+// Re-render on live price ticks (throttled), plus a steady 3s heartbeat.
+let lastTickRender = 0;
+onTick(() => {
+  const now = Date.now();
+  if (now - lastTickRender > 800) {
+    lastTickRender = now;
+    tick();
+  }
+});
 tick();
 setInterval(tick, 3000);

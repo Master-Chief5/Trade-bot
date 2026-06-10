@@ -32,7 +32,7 @@ async function claudeRequest(body) {
 }
 
 const SYSTEM_PROMPT = `You are an expert day trader using ICT (Inner Circle Trader) Smart Money Concepts.
-You are given recent OHLC candlestick data (1-minute candles, oldest to newest) for a crypto asset.
+You are given recent OHLC candlestick data (1-minute candles, oldest to newest) for a market asset (crypto or a US stock/ETF).
 Identify: current trend direction (bullish/bearish/ranging), any Fair Value Gaps (FVGs), order blocks,
 recent break of structure (BOS) or market structure shift (MSS), and key support/resistance.
 Decide whether price is at a high-probability point of interest.
@@ -51,13 +51,13 @@ const SIGNAL_SCHEMA = {
   additionalProperties: false,
 };
 
-export async function analyzeWithClaude(symbol, candles) {
+export async function analyzeWithClaude(label, candles) {
   if (!hasClaudeKey()) throw new Error('No API key');
   const recent = candles.slice(-60).map((c) => [
     +c.o.toFixed(6), +c.h.toFixed(6), +c.l.toFixed(6), +c.c.toFixed(6),
   ]);
   const userText =
-    `Asset: ${symbol}/USD\n` +
+    `Asset: ${label}\n` +
     `Current price: ${candles[candles.length - 1].c}\n` +
     `Recent 1m candles as [open, high, low, close], oldest first:\n` +
     JSON.stringify(recent);
@@ -145,16 +145,16 @@ export function analyzeHeuristic(symbol, candles) {
 }
 
 // --- Optional news sentiment via web search --------------------------------
-export async function analyzeNews(symbol) {
+export async function analyzeNews(label) {
   if (!hasClaudeKey()) return { sentiment: 'NEUTRAL', summary: 'News disabled (no API key).' };
   try {
     const resp = await claudeRequest({
       system:
-        'You are a crypto markets news analyst. Use web search to find news from the last few hours about the given asset, plus any major macro/regulatory events today. Be concise.',
+        'You are a financial markets news analyst. Use web search to find news from the last few hours about the given asset, plus any major macro/regulatory events today. Be concise.',
       messages: [{
         role: 'user',
         content:
-          `Asset: ${symbol}. Summarize the latest short-term sentiment in one sentence, ` +
+          `Asset: ${label}. Summarize the latest short-term sentiment in one sentence, ` +
           `then end your reply with a final line exactly in the form: SENTIMENT: POSITIVE  (or NEGATIVE or NEUTRAL).`,
       }],
       tools: [{ type: 'web_search_20260209', name: 'web_search' }],

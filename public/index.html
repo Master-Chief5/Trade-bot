@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crypto Paper Trader</title>
+  <title>Paper Trader</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <div class="brand">
       <span class="logo">◎</span>
-      <h1>Crypto Paper Trader</h1>
+      <h1>Paper Trader</h1>
       <span class="badge paper">PAPER · simulated</span>
     </div>
     <div class="sources">
@@ -69,11 +69,14 @@
         </div>
       </div>
       <div class="field">
-        <label>Coin</label>
+        <label>Asset</label>
         <select id="symbol"></select>
       </div>
+      <div class="field checkbox">
+        <label><input id="autoSize" type="checkbox" checked /> Let it choose the trade size (stakes more when it's more confident)</label>
+      </div>
       <div class="field">
-        <label>$ per trade</label>
+        <label>$ per trade (only used when auto-size is off)</label>
         <input id="tradeAmount" type="number" min="1" step="5" value="50" />
       </div>
       <div class="field">
@@ -81,8 +84,8 @@
         <input id="confidenceThreshold" type="number" min="0" max="100" step="1" value="70" />
       </div>
       <div class="field">
-        <label>Check interval (sec)</label>
-        <input id="pollIntervalSec" type="number" min="10" step="5" value="60" />
+        <label>Check interval (sec — min 5)</label>
+        <input id="pollIntervalSec" type="number" min="5" step="5" value="15" />
       </div>
       <div class="field checkbox">
         <label><input id="useNews" type="checkbox" /> Use news sentiment (needs API key)</label>

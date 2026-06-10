@@ -94,6 +94,16 @@ td.why { white-space: normal; min-width: 200px; color: var(--muted); }
   padding: 4px 10px; border-radius: 7px; cursor: pointer; font-size: 12px; }
 .copy-btn:hover { border-color: var(--accent); }
 
+/* Live-feel flashes */
+@keyframes flashUp { 0% { color: var(--green); text-shadow: 0 0 12px rgba(46,204,113,.7); } }
+@keyframes flashDown { 0% { color: var(--red); text-shadow: 0 0 12px rgba(255,92,92,.7); } }
+.flash-up { animation: flashUp .8s ease-out; }
+.flash-down { animation: flashDown .8s ease-out; }
+@keyframes newTradeRow { 0% { background: rgba(76,154,255,.28); } }
+tr.new-trade td { animation: newTradeRow 1.6s ease-out; }
+.chip-live { color: var(--green); border-color: rgba(46,204,113,.5); }
+input:disabled { opacity: .45; }
+
 footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 26px; }
 .hidden { display: none; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);

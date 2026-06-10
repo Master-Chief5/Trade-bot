@@ -1,9 +1,10 @@
-# Crypto Paper Trader
+# Paper Trader — crypto & stocks
 
-A watch-only crypto trading dashboard. You tell it **how much you have**, it
-watches the live market, and it logs the **BUY/SELL trades it would make** —
-all **simulated against a balance you choose**. You watch the trade feed and
-**copy any trade into your own account by hand** if you decide to.
+A watch-only trading dashboard for **crypto and US stocks/ETFs**. You tell it
+**how much you have**, it watches the live market in real time, and it logs the
+**BUY/SELL trades it would make** — all **simulated against a balance you
+choose**. You watch the trade feed and **copy any trade into your own account
+by hand** if you decide to.
 
 > **Paper mode only.** This app never places a real order, never connects to a
 > brokerage or exchange account, and never touches another app. "Copy a trade"
@@ -35,50 +36,74 @@ npm start
 ```
 
 The server only serves static files — all logic runs in the page.
+(Note: stock data needs the Android app or the simulator on desktop — see below.)
+
+## Live updates
+
+- **Crypto prices stream in real time** over exchange WebSockets
+  (Binance, falling back to Coinbase) — the price, chart and unrealized P&L
+  tick continuously, and the source chip shows **LIVE**.
+- While Auto-watch is ON, a fresh decision is made **every time a 1-minute
+  candle closes**, plus on your configured check interval (down to every 5s).
+- **Stocks** poll Yahoo Finance every 15s (there's no public stock WebSocket).
+  Stock prices only move during US market hours (9:30–16:00 ET, Mon–Fri);
+  outside those hours the source chip says "market closed".
+- New trades flash in the feed the moment they execute.
+
+## Assets
+
+- **Crypto:** BTC, ETH, SOL, XRP, DOGE, ADA — live from Binance/Coinbase
+  public APIs (no account needed), in the app *and* in desktop browsers.
+- **Stocks & ETFs:** AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, SPY — live
+  from Yahoo Finance **in the Android app**. Desktop browsers block Yahoo's
+  API (CORS), so on a computer stocks run on the built-in simulator instead.
+- If a live source is unreachable, the app falls back to a **market
+  simulator** so it keeps working — the data source is always labelled
+  (`live:binance` / `live:coinbase` / `live:yahoo` / `simulated`).
+
+## Trade sizing
+
+By default **the bot chooses its own trade size**: it stakes a share of
+available cash equal to its confidence (82% confident → 82% of cash).
+Untick "Let it choose the trade size" to use a fixed **$ per trade** instead.
+Selling always closes the whole position.
 
 ## Claude analysis (optional)
 
-Out of the box the app uses a local **SMA-cross + RSI heuristic**, fully
-offline. To switch the analyzer to **Claude**, paste your Anthropic API key
-into **Setup → Claude API key** and hit "Save settings". The key is stored
-only on your device (localStorage) and is sent only to `api.anthropic.com`.
-"Use news sentiment" adds a Claude web-search sentiment pass (needs the key).
+Out of the box the app uses a local **SMA-cross + RSI heuristic** — free and
+fully offline. To switch the analyzer to **Claude**, paste your own Anthropic
+API key into **Setup → Claude API key** and hit "Save settings".
 
-## What it does
-
-- **Live data** from Binance/Coinbase public APIs (no account needed). If those
-  are unreachable, it falls back to a built-in **market simulator** so the app
-  still runs — the data source is labelled in the UI
-  (`live:binance` / `live:coinbase` / `simulated`).
-- **Analysis** via Claude (structured-output JSON) when a key is set, else the
-  local heuristic.
-- **Paper engine** trades your chosen balance: buys `$ per trade` worth on a
-  qualifying BUY, sells the position on a SELL, respects a confidence threshold
-  and a cooldown, and tracks realized + unrealized P&L.
-- **Headline P&L** shows exactly how much you're up or down on your balance.
-- **Trade feed** with a **Copy** button on every row.
-
-State persists in the device's local storage.
+- Get a key at [platform.claude.com](https://platform.claude.com) → API keys
+  (it's tied to your own Anthropic account and billing — nobody can hand you one).
+- The key is stored only on your device (localStorage) and sent only to
+  `api.anthropic.com`.
+- **Cost note:** every check costs a small amount of API credit. With a very
+  fast check interval (5s = ~720 checks/hour) that adds up — the free local
+  heuristic is unlimited. "Use news sentiment" adds a second Claude call per check.
 
 ## Settings
 
 - **How much you have** — your starting balance; "Set & reset" applies it and clears history.
-- **Coin** — BTC, ETH, SOL, XRP, DOGE, ADA.
-- **$ per trade** — size of each simulated buy.
+- **Asset** — crypto (BTC, ETH, SOL, XRP, DOGE, ADA) or stocks (AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, SPY).
+- **Let it choose the trade size** — confidence-scaled position sizing (default ON).
+- **$ per trade** — fixed size of each simulated buy (when auto-size is off).
 - **Confidence threshold** — minimum analyzer confidence (0–100) to act.
-- **Check interval** — how often Auto-watch polls the market.
+- **Check interval** — how often Auto-watch polls (min 5s; candle-close checks happen automatically too).
 - **Use news sentiment** — adds a Claude web-search sentiment pass (needs API key).
 - **Claude API key** — optional; stays on this device.
 - **Check now** — run one analysis cycle immediately.
-- **Auto-watch ON/OFF** — start/stop the polling loop. Off by default.
+- **Auto-watch ON/OFF** — start/stop the watch loop. Off by default.
 
 ## How a decision is made
 
-1. Pull recent 1-minute candles.
-2. Analyzer returns `{ signal, confidence, reasoning, setup_type }`.
+1. Pull the last ~100 one-minute candles for the chosen asset.
+2. Analyzer (Claude or the local heuristic) returns
+   `{ signal: BUY/SELL/HOLD, confidence: 0-100, reasoning, setup_type }`.
 3. If news is on: combine with sentiment (BUY+NEGATIVE → HOLD, SELL+POSITIVE → HOLD).
 4. Paper engine executes the (simulated) trade if confidence ≥ threshold, not in
-   cooldown, and the position rules allow it.
+   cooldown (5 min between trades), and the position rules allow it
+   (one position at a time; BUY opens it, SELL closes it).
 
 ## Project layout
 
@@ -86,9 +111,10 @@ State persists in the device's local storage.
 public/                    The whole app (vanilla HTML/CSS/JS, no build step)
   app.js                     Dashboard UI
   js/engine.js               Watch loop + view assembly
-  js/marketData.js           Live candles + offline simulator
+  js/priceFeed.js            Real-time price stream (WebSocket/poll/simulated)
+  js/marketData.js           Candles: Binance/Coinbase/Yahoo + offline simulator
   js/analyzer.js             Claude (Messages API) + local heuristic + news
-  js/paperEngine.js          Simulated buy/sell, P&L
+  js/paperEngine.js          Simulated buy/sell, sizing, P&L
   js/store.js                localStorage state
 src/server.js              Tiny static server for desktop use
 capacitor.config.json      Android wrapper config

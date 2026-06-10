@@ -18,9 +18,10 @@ const storage = typeof localStorage !== 'undefined'
 export const DEFAULT_CONFIG = {
   symbol: 'BTC',
   startingBalance: 500,      // the amount you tell it you have
-  tradeAmount: 50,           // $ per simulated buy
+  tradeAmount: 50,           // $ per simulated buy (when autoSize is off)
+  autoSize: true,            // let the bot size each buy from its confidence
   confidenceThreshold: 70,   // min analyzer confidence to act
-  pollIntervalSec: 60,       // how often auto-mode checks the market
+  pollIntervalSec: 15,       // how often auto-mode checks the market (min 5)
   cooldownMinutes: 5,        // min gap between trades
   autoMode: false,           // off by default (no surprise API spend)
   useNews: false,            // optional web-search sentiment (needs API key)
