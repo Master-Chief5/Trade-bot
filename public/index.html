@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Paper Trader</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">◎</span>
+      <h1>Crypto Paper Trader</h1>
+      <span class="badge paper">PAPER · simulated</span>
+    </div>
+    <div class="sources">
+      <span id="dataSource" class="chip">data: —</span>
+      <span id="analyzerSource" class="chip">analyzer: —</span>
+    </div>
+  </header>
+
+  <p class="disclaimer">
+    Every trade below is <strong>simulated</strong> against a balance you choose — no real order is ever placed and no
+    brokerage is touched. If you want to act on a trade, you copy it into your own account, by hand, at your own risk.
+  </p>
+
+  <!-- Headline: P&L vs your balance -->
+  <section class="hero">
+    <div class="hero-pnl">
+      <div class="hero-label">Profit / loss on your <span id="startBalLabel">$500</span></div>
+      <div id="totalPnl" class="hero-value">$0.00</div>
+      <div id="pnlPct" class="hero-sub">0.00%</div>
+    </div>
+    <div class="hero-grid">
+      <div><span class="k">Equity</span><span id="equity" class="v">$0.00</span></div>
+      <div><span class="k">Cash</span><span id="cash" class="v">$0.00</span></div>
+      <div><span class="k">Realized</span><span id="realized" class="v">$0.00</span></div>
+      <div><span class="k">Unrealized</span><span id="unrealized" class="v">$0.00</span></div>
+      <div><span class="k">Position</span><span id="position" class="v">flat</span></div>
+      <div><span class="k">Price</span><span id="price" class="v">—</span></div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <!-- Current signal -->
+    <div class="card">
+      <h2>Current signal</h2>
+      <div class="signal-row">
+        <div id="signalBadge" class="signal-badge hold">HOLD</div>
+        <div class="signal-meta">
+          <div id="confidence" class="confidence">—</div>
+          <div id="setupType" class="setup">—</div>
+        </div>
+      </div>
+      <p id="reasoning" class="reasoning">Waiting for the first read…</p>
+      <p id="sentimentLine" class="sentiment hidden"></p>
+      <p id="signalNote" class="note"></p>
+      <canvas id="chart" width="600" height="120"></canvas>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+      <h2>Setup</h2>
+      <div class="field">
+        <label>How much you have ($)</label>
+        <div class="row">
+          <input id="startingBalance" type="number" min="1" step="10" value="500" />
+          <button id="resetBtn" class="btn">Set &amp; reset</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Coin</label>
+        <select id="symbol"></select>
+      </div>
+      <div class="field">
+        <label>$ per trade</label>
+        <input id="tradeAmount" type="number" min="1" step="5" value="50" />
+      </div>
+      <div class="field">
+        <label>Confidence threshold (%)</label>
+        <input id="confidenceThreshold" type="number" min="0" max="100" step="1" value="70" />
+      </div>
+      <div class="field">
+        <label>Check interval (sec)</label>
+        <input id="pollIntervalSec" type="number" min="10" step="5" value="60" />
+      </div>
+      <div class="field checkbox">
+        <label><input id="useNews" type="checkbox" /> Use news sentiment (needs API key)</label>
+      </div>
+      <div class="row">
+        <button id="saveBtn" class="btn">Save settings</button>
+        <button id="analyzeBtn" class="btn primary">Check now</button>
+      </div>
+      <div class="auto">
+        <span>Auto-watch</span>
+        <button id="autoToggle" class="toggle off">OFF</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Trade feed -->
+  <section class="card">
+    <div class="card-head">
+      <h2>Its trades <span class="muted">— copy any you like</span></h2>
+      <span id="tradeCount" class="muted"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="tradesTable">
+        <thead>
+          <tr>
+            <th>Time</th><th>Action</th><th>Size</th><th>Price</th>
+            <th>Conf.</th><th>Trade P&amp;L</th><th>Why</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="tradesBody">
+          <tr><td colspan="8" class="empty">No trades yet. Hit “Check now”, or turn on Auto-watch.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    Paper-trading tool for learning only. Not financial advice. Markets are risky; copy trades at your own risk.
+  </footer>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>
