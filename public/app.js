@@ -58,9 +58,9 @@ function render(s) {
   // Source chips
   $('dataSource').textContent = 'data: ' + s.dataSource + (s.feedLive ? ' · LIVE' : '');
   $('dataSource').className = 'chip' + (s.feedLive ? ' chip-live' : '');
-  // Show what actually analyzed the last cycle — including Claude failures
+  // Show what actually analyzed the last cycle — including AI failures
   // (bad key, no credit), which fall back to the heuristic with the reason.
-  $('analyzerSource').textContent = 'analyzer: ' + (s.latest?.analyzerSource || (s.hasClaudeKey ? 'Claude' : 'heuristic'));
+  $('analyzerSource').textContent = 'analyzer: ' + (s.latest?.analyzerSource || s.analyzerSource);
 
   // Current signal
   const L = s.latest;

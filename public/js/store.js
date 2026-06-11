@@ -99,7 +99,8 @@ export function resetPortfolio(startingBalance) {
   return s;
 }
 
-// The Anthropic API key lives outside the state blob, on this device only.
+// The AI API key (Anthropic sk-ant-… or NVIDIA nvapi-…) lives outside the
+// state blob, on this device only.
 export function getApiKey() {
   return storage.getItem(API_KEY_KEY) || '';
 }

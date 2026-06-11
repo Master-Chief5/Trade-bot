@@ -1,22 +1,36 @@
-// Signal generation. Uses Claude via the Anthropic Messages API when the user
-// has saved an API key in Settings; otherwise falls back to a local
-// technical-analysis heuristic so the app is fully functional offline.
+// Signal generation. Uses an AI model when the user has saved an API key in
+// Settings — Claude via the Anthropic Messages API (sk-ant-… keys) or an
+// NVIDIA-hosted open model via the build.nvidia.com OpenAI-style API
+// (nvapi-… keys) — otherwise falls back to a local technical-analysis
+// heuristic so the app is fully functional offline.
 //
 // This is a zero-build static page (also packaged into the Android WebView),
-// so it calls the REST API with fetch rather than the npm SDK. The
-// anthropic-dangerous-direct-browser-access header opts in to CORS; the key is
-// the user's own, entered on-device and stored only in localStorage.
+// so it calls the REST APIs with fetch rather than npm SDKs. The key is the
+// user's own, entered on-device and stored only in localStorage. In the
+// Android app CapacitorHttp routes fetch natively so there are no CORS
+// limits; in a desktop browser only Anthropic permits direct calls (via the
+// anthropic-dangerous-direct-browser-access header) — NVIDIA is blocked by
+// CORS there and the app falls back to the heuristic.
 import { getApiKey } from './store.js';
 
-const MODEL = 'claude-opus-4-8';
-const API_URL = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_MODEL = 'claude-opus-4-8';
+const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
+const NVIDIA_MODEL = 'meta/llama-3.3-70b-instruct';
+const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
-export function hasClaudeKey() {
+// 'claude' | 'nvidia' | null, detected from the saved key's prefix.
+export function aiName() {
+  const key = getApiKey();
+  if (!key) return null;
+  return key.startsWith('nvapi-') ? 'nvidia' : 'claude';
+}
+
+export function hasAiKey() {
   return !!getApiKey();
 }
 
 async function claudeRequest(body) {
-  const res = await fetch(API_URL, {
+  const res = await fetch(CLAUDE_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -24,11 +38,37 @@ async function claudeRequest(body) {
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: MODEL, max_tokens: 1024, ...body }),
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1024, ...body }),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(data?.error?.message || `API error ${res.status}`);
   return data;
+}
+
+async function nvidiaRequest(messages) {
+  const res = await fetch(NVIDIA_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${getApiKey()}`,
+    },
+    body: JSON.stringify({ model: NVIDIA_MODEL, messages, temperature: 0.2, max_tokens: 500 }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.error?.message || data?.detail || data?.title || `API error ${res.status}`);
+  }
+  return data?.choices?.[0]?.message?.content || '';
+}
+
+// Open models lack Anthropic's structured-output guarantee — ask for bare
+// JSON, then dig it out of whatever fences or prose surround it.
+function extractJson(text) {
+  const cleaned = String(text).replace(/```(?:json)?/g, '');
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('model reply had no JSON');
+  return JSON.parse(cleaned.slice(start, end + 1));
 }
 
 const SYSTEM_PROMPT = `You are an expert day trader using ICT (Inner Circle Trader) Smart Money Concepts.
@@ -51,8 +91,9 @@ const SIGNAL_SCHEMA = {
   additionalProperties: false,
 };
 
-export async function analyzeWithClaude(label, candles) {
-  if (!hasClaudeKey()) throw new Error('No API key');
+export async function analyzeWithAI(label, candles) {
+  const provider = aiName();
+  if (!provider) throw new Error('No API key');
   const recent = candles.slice(-60).map((c) => [
     +c.o.toFixed(6), +c.h.toFixed(6), +c.l.toFixed(6), +c.c.toFixed(6),
   ]);
@@ -62,16 +103,33 @@ export async function analyzeWithClaude(label, candles) {
     `Recent 1m candles as [open, high, low, close], oldest first:\n` +
     JSON.stringify(recent);
 
-  const resp = await claudeRequest({
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userText }],
-    output_config: { format: { type: 'json_schema', schema: SIGNAL_SCHEMA } },
-  });
+  let out;
+  if (provider === 'nvidia') {
+    const text = await nvidiaRequest([
+      { role: 'system', content: SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content:
+          userText +
+          '\nRespond with ONLY this JSON object, nothing else:\n' +
+          '{"signal":"BUY"|"SELL"|"HOLD","confidence":<0-100>,"reasoning":"<one sentence>","setup_type":"FVG"|"OB"|"BOS"|"MSS"|"OTHER"|"NONE"}',
+      },
+    ]);
+    out = extractJson(text);
+  } else {
+    const resp = await claudeRequest({
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userText }],
+      output_config: { format: { type: 'json_schema', schema: SIGNAL_SCHEMA } },
+    });
+    if (resp.stop_reason === 'refusal') throw new Error('refusal');
+    out = JSON.parse(resp.content.find((b) => b.type === 'text')?.text || '{}');
+  }
 
-  if (resp.stop_reason === 'refusal') throw new Error('refusal');
-  const text = resp.content.find((b) => b.type === 'text')?.text || '{}';
-  const out = JSON.parse(text);
-  out.confidence = clamp(Math.round(out.confidence), 0, 100);
+  if (!['BUY', 'SELL', 'HOLD'].includes(out.signal)) out.signal = 'HOLD';
+  out.confidence = clamp(Math.round(+out.confidence || 0), 0, 100);
+  out.reasoning = String(out.reasoning || '').slice(0, 300);
+  if (!['FVG', 'OB', 'BOS', 'MSS', 'OTHER', 'NONE'].includes(out.setup_type)) out.setup_type = 'OTHER';
   return out;
 }
 
@@ -145,8 +203,10 @@ export function analyzeHeuristic(symbol, candles) {
 }
 
 // --- Optional news sentiment via web search --------------------------------
+// Claude-only: it relies on the Anthropic web-search tool, which the
+// NVIDIA-hosted open models don't have.
 export async function analyzeNews(label) {
-  if (!hasClaudeKey()) return { sentiment: 'NEUTRAL', summary: 'News disabled (no API key).' };
+  if (aiName() !== 'claude') return { sentiment: 'NEUTRAL', summary: 'News needs a Claude (sk-ant-…) key.' };
   try {
     const resp = await claudeRequest({
       system:

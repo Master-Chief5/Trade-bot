@@ -4,7 +4,7 @@
 import { getState, saveState } from './store.js';
 import { getMarket, supportedSymbols, symbolGroups, assetLabel } from './marketData.js';
 import {
-  analyzeWithClaude, analyzeHeuristic, analyzeNews, combineDecision, hasClaudeKey,
+  analyzeWithAI, analyzeHeuristic, analyzeNews, combineDecision, hasAiKey, aiName,
 } from './analyzer.js';
 import { applyDecision, portfolioView } from './paperEngine.js';
 import { ensureFeed, onCandleClose, feedAlive } from './priceFeed.js';
@@ -22,13 +22,14 @@ export async function runCycle() {
     const price = candles[candles.length - 1].c;
 
     let chart, analyzerSource;
-    if (hasClaudeKey()) {
+    const ai = aiName(); // 'claude' | 'nvidia' | null, from the saved key
+    if (ai) {
       try {
-        chart = await analyzeWithClaude(label, candles);
-        analyzerSource = 'claude';
+        chart = await analyzeWithAI(label, candles);
+        analyzerSource = ai;
       } catch (err) {
         chart = analyzeHeuristic(sym, candles);
-        analyzerSource = `heuristic (Claude error: ${err.message})`;
+        analyzerSource = `heuristic (${ai} error: ${err.message})`;
       }
     } else {
       chart = analyzeHeuristic(sym, candles);
@@ -36,7 +37,7 @@ export async function runCycle() {
     }
 
     let sentiment = 'NEUTRAL', newsSummary = null;
-    if (s.config.useNews && hasClaudeKey()) {
+    if (s.config.useNews && hasAiKey()) {
       const news = await analyzeNews(label);
       sentiment = news.sentiment;
       newsSummary = news.summary;
@@ -89,10 +90,9 @@ export function getStateView() {
   const price = candles.length ? candles[candles.length - 1].c : (ms.lastPrice || 0);
   return {
     paperMode: true,
-    hasClaudeKey: hasClaudeKey(),
     config: s.config,
     dataSource: ms.source || 'none',
-    analyzerSource: hasClaudeKey() ? 'claude' : 'heuristic',
+    analyzerSource: aiName() || 'heuristic',
     feedLive: feedAlive(),
     price,
     latest: s.latest,

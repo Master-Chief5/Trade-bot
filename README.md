@@ -68,19 +68,31 @@ available cash equal to its confidence (82% confident → 82% of cash).
 Untick "Let it choose the trade size" to use a fixed **$ per trade** instead.
 Selling always closes the whole position.
 
-## Claude analysis (optional)
+## AI analysis (optional)
 
 Out of the box the app uses a local **SMA-cross + RSI heuristic** — free and
-fully offline. To switch the analyzer to **Claude**, paste your own Anthropic
-API key into **Setup → Claude API key** and hit "Save settings".
+fully offline. To switch the analyzer to a real AI model, paste an API key
+into **Setup → AI key** and hit "Save settings". The provider is detected
+from the key itself:
 
-- Get a key at [platform.claude.com](https://platform.claude.com) → API keys
-  (it's tied to your own Anthropic account and billing — nobody can hand you one).
-- The key is stored only on your device (localStorage) and sent only to
-  `api.anthropic.com`.
-- **Cost note:** every check costs a small amount of API credit. With a very
-  fast check interval (5s = ~720 checks/hour) that adds up — the free local
-  heuristic is unlimited. "Use news sentiment" adds a second Claude call per check.
+- **Claude** (`sk-ant-…` keys): the Anthropic Messages API. Get a key at
+  [platform.claude.com](https://platform.claude.com) → API keys. Sent only to
+  `api.anthropic.com`. Works in the Android app and in desktop browsers.
+- **NVIDIA** (`nvapi-…` keys): an NVIDIA-hosted open model
+  (`meta/llama-3.3-70b-instruct`) via the OpenAI-style API at
+  [build.nvidia.com](https://build.nvidia.com). Sent only to
+  `integrate.api.nvidia.com`. Works in the Android app; plain desktop
+  browsers block it (CORS), where the analyzer falls back to the heuristic.
+
+The key is stored only on your device (localStorage). The `analyzer:` chip in
+the header shows what actually analyzed the last check — `claude`, `nvidia`,
+or `heuristic`, including the error reason when an AI call failed and the
+heuristic stood in.
+
+**Cost note:** every check spends API credit. With a very fast check interval
+(5s = ~720 checks/hour) that adds up — the free local heuristic is unlimited.
+"Use news sentiment" adds a second call per check (Claude keys only — it
+relies on Anthropic's web-search tool).
 
 ## Settings
 
@@ -90,8 +102,8 @@ API key into **Setup → Claude API key** and hit "Save settings".
 - **$ per trade** — fixed size of each simulated buy (when auto-size is off).
 - **Confidence threshold** — minimum analyzer confidence (0–100) to act.
 - **Check interval** — how often Auto-watch polls (min 5s; candle-close checks happen automatically too).
-- **Use news sentiment** — adds a Claude web-search sentiment pass (needs API key).
-- **Claude API key** — optional; stays on this device.
+- **Use news sentiment** — adds a Claude web-search sentiment pass (needs a Claude key).
+- **AI key** — optional; Claude (`sk-ant-…`) or NVIDIA (`nvapi-…`); stays on this device.
 - **Check now** — run one analysis cycle immediately.
 - **Auto-watch ON/OFF** — the watch loop. **On by default** — the app starts
   watching the moment you open it.
@@ -99,7 +111,7 @@ API key into **Setup → Claude API key** and hit "Save settings".
 ## How a decision is made
 
 1. Pull the last ~100 one-minute candles for the chosen asset.
-2. Analyzer (Claude or the local heuristic) returns
+2. Analyzer (Claude, an NVIDIA-hosted model, or the local heuristic) returns
    `{ signal: BUY/SELL/HOLD, confidence: 0-100, reasoning, setup_type }`.
 3. If news is on: combine with sentiment (BUY+NEGATIVE → HOLD, SELL+POSITIVE → HOLD).
 4. Paper engine executes the (simulated) trade if confidence ≥ threshold
@@ -114,7 +126,7 @@ public/                    The whole app (vanilla HTML/CSS/JS, no build step)
   js/engine.js               Watch loop + view assembly
   js/priceFeed.js            Real-time price stream (WebSocket/poll/simulated)
   js/marketData.js           Candles: Binance/Coinbase/Yahoo + offline simulator
-  js/analyzer.js             Claude (Messages API) + local heuristic + news
+  js/analyzer.js             AI analysis (Claude / NVIDIA) + local heuristic + news
   js/paperEngine.js          Simulated buy/sell, sizing, P&L
   js/store.js                localStorage state
 src/server.js              Tiny static server for desktop use
