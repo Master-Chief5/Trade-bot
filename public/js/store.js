@@ -1,6 +1,6 @@
 // Browser-side state store backed by localStorage. Same state shape as the
 // original server version so the rest of the engine ports over unchanged.
-const STATE_KEY = 'cpt_state_v2'; // v2: live-by-default settings
+const STATE_KEY = 'cpt_state_v3'; // v3: take-profit/stop-loss risk exits
 const API_KEY_KEY = 'cpt_anthropic_key';
 
 // Node (used for smoke tests) has no localStorage — fall back to an in-memory shim.
@@ -21,6 +21,8 @@ export const DEFAULT_CONFIG = {
   tradeAmount: 50,           // $ per simulated buy (when autoSize is off)
   autoSize: true,            // let the bot size each buy from its confidence
   confidenceThreshold: 60,   // min analyzer confidence to act
+  takeProfitPct: 1,          // auto-sell a position up this % (0 = off)
+  stopLossPct: 0.5,          // auto-sell a position down this % (0 = off)
   pollIntervalSec: 15,       // how often auto-mode checks the market (min 5)
   cooldownMinutes: 1,        // min gap between trades
   autoMode: true,            // watching starts as soon as the app opens

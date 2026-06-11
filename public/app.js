@@ -88,6 +88,8 @@ function render(s) {
     $('tradeAmount').value = s.config.tradeAmount;
     $('autoSize').checked = !!s.config.autoSize;
     $('confidenceThreshold').value = s.config.confidenceThreshold;
+    $('takeProfitPct').value = s.config.takeProfitPct;
+    $('stopLossPct').value = s.config.stopLossPct;
     $('pollIntervalSec').value = s.config.pollIntervalSec;
     $('useNews').checked = s.config.useNews;
     if (document.activeElement !== $('apiKey')) $('apiKey').value = getApiKey();
@@ -139,10 +141,11 @@ function renderTrades(trades) {
     return;
   }
 
-  // Flash the newest row briefly when a trade just landed.
+  // Flash the newest row — and the whole screen — when a trade just landed.
   const top = trades[0].id;
   if (lastTopTradeId !== undefined && lastTopTradeId !== null && top !== lastTopTradeId) {
     newTradeUntil = Date.now() + 1600;
+    flashScreen(trades[0].action);
   }
   lastTopTradeId = top;
   const flashTop = Date.now() < newTradeUntil;
@@ -167,6 +170,18 @@ function renderTrades(trades) {
   body.querySelectorAll('.copy-btn').forEach((btn) => {
     btn.addEventListener('click', () => copyTrade(trades[+btn.dataset.i]));
   });
+}
+
+// Light the whole screen up green (BUY) or red (SELL), with a short buzz on
+// phones that support it.
+function flashScreen(action) {
+  const f = $('screenFlash');
+  f.className = 'screen-flash ' + action.toLowerCase();
+  void f.offsetWidth; // restart the animation if one is mid-flight
+  f.classList.add('go');
+  try { navigator.vibrate?.(action === 'BUY' ? [60, 40, 60] : [140]); } catch { /* not supported */ }
+  clearTimeout(flashScreen._t);
+  flashScreen._t = setTimeout(() => (f.className = 'screen-flash'), 1200);
 }
 
 function copyTrade(t) {
@@ -212,11 +227,27 @@ $('analyzeBtn').addEventListener('click', async () => {
   $('analyzeBtn').textContent = 'Check now';
 });
 
+// Switching the asset takes effect immediately — no "Save settings" needed.
+// (It used to wait for Save, and the periodic re-render would even snap the
+// dropdown back to the old asset, so switching looked broken.)
+$('symbol').addEventListener('change', async () => {
+  const s = getState();
+  const sym = $('symbol').value;
+  if (!supportedSymbols().includes(sym) || s.config.symbol === sym) return;
+  s.config.symbol = sym;
+  saveState();
+  toast(`Watching ${sym}`);
+  reschedule();              // realign the timer; kicks a cycle when auto-watch is on
+  render(await runCycle());  // and load the new chart even when it's off
+});
+
 $('saveBtn').addEventListener('click', () => {
   const s = getState();
   const nums = {
     tradeAmount: +$('tradeAmount').value,
     confidenceThreshold: +$('confidenceThreshold').value,
+    takeProfitPct: +$('takeProfitPct').value,
+    stopLossPct: +$('stopLossPct').value,
     pollIntervalSec: +$('pollIntervalSec').value,
   };
   for (const [k, v] of Object.entries(nums)) {
@@ -252,7 +283,7 @@ $('autoToggle').addEventListener('click', () => {
   toast(s.config.autoMode ? 'Auto-watch ON' : 'Auto-watch OFF');
 });
 
-['startingBalance', 'tradeAmount', 'confidenceThreshold', 'pollIntervalSec', 'apiKey'].forEach((id) => {
+['startingBalance', 'tradeAmount', 'confidenceThreshold', 'takeProfitPct', 'stopLossPct', 'pollIntervalSec', 'apiKey'].forEach((id) => {
   $(id).addEventListener('focus', () => (editingFields = true));
   $(id).addEventListener('blur', () => (editingFields = false));
 });

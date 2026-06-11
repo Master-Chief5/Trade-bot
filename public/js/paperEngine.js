@@ -41,8 +41,11 @@ export function applyDecision(state, ctx) {
       executed = true;
     }
   } else if (finalSignal === 'SELL') {
+    // Exits take less evidence than entries: cutting a position early is far
+    // cheaper than opening a bad one, so the bar sits below the entry threshold.
+    const exitThreshold = Math.max(40, cfg.confidenceThreshold - 15);
     if (!holding) note = 'No open position to sell.';
-    else if (belowThreshold) note = `Below confidence threshold (${chart.confidence} < ${cfg.confidenceThreshold}).`;
+    else if (chart.confidence < exitThreshold) note = `Below exit threshold (${chart.confidence} < ${exitThreshold}).`;
     else if (inCooldown) note = 'In cooldown.';
     else {
       const qty = pf.position.qty;
@@ -72,6 +75,41 @@ export function applyDecision(state, ctx) {
   return state.latest;
 }
 
+// Take-profit / stop-loss exit, checked on every live price tick (and each
+// cycle) so it fires the moment a target is hit rather than at the next
+// analysis. Bypasses the confidence threshold and cooldown on purpose — a
+// risk exit must never be blocked. Returns true when it sold.
+export function checkRiskExit(state, symbol, price) {
+  const pf = state.portfolio;
+  const cfg = state.config;
+  if (!pf.position || pf.position.symbol !== symbol || !(price > 0)) return false;
+  const movePct = ((price - pf.position.avgPrice) / pf.position.avgPrice) * 100;
+  const tp = Number(cfg.takeProfitPct) || 0;
+  const sl = Number(cfg.stopLossPct) || 0;
+  const kind = tp > 0 && movePct >= tp ? 'TP' : sl > 0 && movePct <= -sl ? 'SL' : null;
+  if (!kind) return false;
+
+  const qty = pf.position.qty;
+  const proceeds = qty * price;
+  const realized = (price - pf.position.avgPrice) * qty;
+  pf.cash += proceeds;
+  pf.realizedPnl += realized;
+  pf.lastTradeTime = Date.now();
+  recordTrade(state, {
+    action: 'SELL', symbol, qty, price, amountUsd: proceeds,
+    confidence: 100,
+    reasoning: kind === 'TP'
+      ? `Take-profit: position up ${movePct.toFixed(2)}% (target +${tp}%).`
+      : `Stop-loss: position down ${movePct.toFixed(2)}% (limit -${sl}%).`,
+    setup_type: kind, sentiment: 'NEUTRAL',
+    dataSource: state.marketState[symbol]?.source || 'live',
+    analyzerSource: 'risk-exit', realizedPnl: realized,
+  });
+  pf.position = null;
+  saveState();
+  return true;
+}
+
 function recordTrade(state, t) {
   state.trades.unshift({
     id: `${Date.now()}-${tradeSeq++}`,
@@ -84,9 +122,16 @@ function recordTrade(state, t) {
 // Derived portfolio numbers for the UI — centred on P&L vs the starting balance.
 export function portfolioView(state, price) {
   const pf = state.portfolio;
-  const positionValue = pf.position ? pf.position.qty * price : 0;
+  // Price the position from its own symbol — the passed price tracks whichever
+  // ticker is on screen, which may not be the one the position is in.
+  const posPrice = pf.position
+    ? (pf.position.symbol === state.config.symbol
+        ? price
+        : state.marketState[pf.position.symbol]?.lastPrice || pf.position.avgPrice)
+    : 0;
+  const positionValue = pf.position ? pf.position.qty * posPrice : 0;
   const equity = pf.cash + positionValue;
-  const unrealizedPnl = pf.position ? (price - pf.position.avgPrice) * pf.position.qty : 0;
+  const unrealizedPnl = pf.position ? (posPrice - pf.position.avgPrice) * pf.position.qty : 0;
   const totalPnl = equity - pf.startingBalance;
   return {
     startingBalance: pf.startingBalance,

@@ -81,7 +81,17 @@
       </div>
       <div class="field">
         <label>Confidence threshold (%)</label>
-        <input id="confidenceThreshold" type="number" min="0" max="100" step="1" value="70" />
+        <input id="confidenceThreshold" type="number" min="0" max="100" step="1" value="60" />
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Take profit % (auto-sell when up; 0 = off)</label>
+          <input id="takeProfitPct" type="number" min="0" step="0.1" value="1" />
+        </div>
+        <div class="field">
+          <label>Stop loss % (auto-sell when down; 0 = off)</label>
+          <input id="stopLossPct" type="number" min="0" step="0.1" value="0.5" />
+        </div>
       </div>
       <div class="field">
         <label>Check interval (sec — min 5)</label>
@@ -120,7 +130,7 @@
           </tr>
         </thead>
         <tbody id="tradesBody">
-          <tr><td colspan="8" class="empty">No trades yet. Hit “Check now”, or turn on Auto-watch.</td></tr>
+          <tr><td colspan="8" class="empty">No trades yet — it trades the moment a setup appears.</td></tr>
         </tbody>
       </table>
     </div>
@@ -130,6 +140,7 @@
     Paper-trading tool for learning only. Not financial advice. Markets are risky; copy trades at your own risk.
   </footer>
 
+  <div id="screenFlash" class="screen-flash"></div>
   <div id="toast" class="toast hidden"></div>
   <script type="module" src="app.js"></script>
 </body>

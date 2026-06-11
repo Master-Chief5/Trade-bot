@@ -6,8 +6,8 @@ import { getMarket, supportedSymbols, symbolGroups, assetLabel } from './marketD
 import {
   analyzeWithAI, analyzeHeuristic, analyzeNews, combineDecision, hasAiKey, aiName,
 } from './analyzer.js';
-import { applyDecision, portfolioView } from './paperEngine.js';
-import { ensureFeed, onCandleClose, feedAlive } from './priceFeed.js';
+import { applyDecision, portfolioView, checkRiskExit } from './paperEngine.js';
+import { ensureFeed, onCandleClose, onTick, feedAlive } from './priceFeed.js';
 
 // --- Core watch cycle ------------------------------------------------------
 let cycleRunning = false;
@@ -20,12 +20,14 @@ export async function runCycle() {
     const label = assetLabel(sym);
     const { candles, source } = await getMarket(sym);
     const price = candles[candles.length - 1].c;
+    checkRiskExit(s, sym, price); // catch TP/SL gaps even when the tick feed is down
 
     let chart, analyzerSource;
     const ai = aiName(); // 'claude' | 'nvidia' | null, from the saved key
+    const position = s.portfolio.position?.symbol === sym ? s.portfolio.position : null;
     if (ai) {
       try {
-        chart = await analyzeWithAI(label, candles);
+        chart = await analyzeWithAI(label, candles, position);
         analyzerSource = ai;
       } catch (err) {
         chart = analyzeHeuristic(sym, candles);
@@ -64,6 +66,13 @@ export async function runCycle() {
 // it right away (in addition to the interval timer) while Auto-watch is on.
 onCandleClose(() => {
   if (getState().config.autoMode) runCycle();
+});
+
+// Take-profit / stop-loss runs on every live tick — exits fire within a
+// second of the price touching a target instead of waiting for a cycle.
+onTick((price) => {
+  const s = getState();
+  checkRiskExit(s, s.config.symbol, price);
 });
 
 // --- Auto-mode scheduler ----------------------------------------------------

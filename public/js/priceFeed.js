@@ -12,17 +12,21 @@ import { symbolMeta, fetchLiveCandles, simulateTick } from './marketData.js';
 let ws = null;
 let pollTimer = null;
 let current = { sym: null, mode: 'none' };
-let tickHandler = null;
-let candleCloseHandler = null;
+const tickHandlers = [];        // engine (risk exits) + UI (render) both listen
+const candleCloseHandlers = [];
 let alive = false;
 
-export function onTick(fn) { tickHandler = fn; }
-export function onCandleClose(fn) { candleCloseHandler = fn; }
+export function onTick(fn) { tickHandlers.push(fn); }
+export function onCandleClose(fn) { candleCloseHandlers.push(fn); }
 export function feedAlive() { return alive; }
 
 function emitTick(price) {
   alive = true;
-  if (tickHandler) tickHandler(price);
+  for (const fn of tickHandlers) fn(price);
+}
+
+function emitCandleClose() {
+  for (const fn of candleCloseHandlers) fn();
 }
 
 // Fold a streamed price into the stored candles (extend the last candle, or
@@ -80,7 +84,7 @@ export function ensureFeed() {
           if (!k) return;
           applyPrice(sym, +k.c, +k.t);
           emitTick(+k.c);
-          if (k.x && candleCloseHandler) candleCloseHandler(); // minute candle closed
+          if (k.x) emitCandleClose(); // minute candle closed
         } catch { /* ignore malformed frame */ }
       };
       ws.onerror = () => stopFeed();

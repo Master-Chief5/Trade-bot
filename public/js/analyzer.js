@@ -91,17 +91,21 @@ const SIGNAL_SCHEMA = {
   additionalProperties: false,
 };
 
-export async function analyzeWithAI(label, candles) {
+export async function analyzeWithAI(label, candles, position = null) {
   const provider = aiName();
   if (!provider) throw new Error('No API key');
   const recent = candles.slice(-60).map((c) => [
     +c.o.toFixed(6), +c.h.toFixed(6), +c.l.toFixed(6), +c.c.toFixed(6),
   ]);
+  const last = candles[candles.length - 1].c;
+  const posLine = position
+    ? `\nOpen position: entered at ${position.avgPrice}, currently ${(((last - position.avgPrice) / position.avgPrice) * 100).toFixed(2)}% from entry — SELL exits it, BUY is not possible.`
+    : '\nNo open position — BUY would open one, SELL is not possible.';
   const userText =
     `Asset: ${label}\n` +
-    `Current price: ${candles[candles.length - 1].c}\n` +
+    `Current price: ${last}\n` +
     `Recent 1m candles as [open, high, low, close], oldest first:\n` +
-    JSON.stringify(recent);
+    JSON.stringify(recent) + posLine;
 
   let out;
   if (provider === 'nvidia') {
@@ -134,13 +138,20 @@ export async function analyzeWithAI(label, candles) {
 }
 
 // --- Local heuristic (no API key needed) -----------------------------------
-function smaSeries(values, period) {
-  const out = [];
-  for (let i = 0; i < values.length; i++) {
-    if (i < period - 1) { out.push(null); continue; }
-    let sum = 0;
-    for (let j = i - period + 1; j <= i; j++) sum += values[j];
-    out.push(sum / period);
+// Weighted evidence scoring across five independent reads of the chart:
+// EMA trend, fresh EMA cross, momentum (rate of change), RSI extremes, and
+// 20-bar breakout. Each contributes bullish (+) or bearish (−) points; the
+// total decides the signal and scales the confidence. Faster than the old
+// single SMA-cross trigger (EMAs react sooner, and any strong combination
+// fires — not just a cross), and the reasoning lists exactly which factors
+// agreed.
+function emaSeries(values, period) {
+  const k = 2 / (period + 1);
+  let e = values[0];
+  const out = [e];
+  for (let i = 1; i < values.length; i++) {
+    e = values[i] * k + e * (1 - k);
+    out.push(e);
   }
   return out;
 }
@@ -164,40 +175,54 @@ export function analyzeHeuristic(symbol, candles) {
   if (closes.length < 30) {
     return { signal: 'HOLD', confidence: 0, reasoning: 'Warming up — not enough candles yet.', setup_type: 'NONE' };
   }
-  const short = smaSeries(closes, 7);
-  const long = smaSeries(closes, 25);
+  const fast = emaSeries(closes, 9);
+  const slow = emaSeries(closes, 21);
+  const fNow = fast.at(-1), fPrev = fast.at(-2);
+  const sNow = slow.at(-1), sPrev = slow.at(-2);
   const r = rsi(closes, 14);
-  const sNow = short.at(-1), sPrev = short.at(-2);
-  const lNow = long.at(-1), lPrev = long.at(-2);
-  const spreadPct = ((sNow - lNow) / lNow) * 100;
+  const price = closes.at(-1);
+  const roc10 = ((price - closes.at(-11)) / closes.at(-11)) * 100;
+  // 20-bar breakout, excluding the current candle.
+  const window = candles.slice(-21, -1);
+  const hi20 = Math.max(...window.map((c) => c.h));
+  const lo20 = Math.min(...window.map((c) => c.l));
 
-  const crossedUp = sPrev <= lPrev && sNow > lNow;
-  const crossedDown = sPrev >= lPrev && sNow < lNow;
+  let score = 0;
+  const bull = [], bear = [];
+  const add = (pts, label) => {
+    score += pts;
+    (pts > 0 ? bull : bear).push(label);
+  };
 
-  let signal = 'HOLD', setup_type = 'NONE', confidence = 35;
+  if (fNow > sNow) add(1, 'uptrend (EMA9>EMA21)'); else if (fNow < sNow) add(-1, 'downtrend (EMA9<EMA21)');
+  if (fPrev <= sPrev && fNow > sNow) add(1.5, 'fresh bullish cross');
+  else if (fPrev >= sPrev && fNow < sNow) add(-1.5, 'fresh bearish cross');
+  if (roc10 > 0.12) add(0.8, `momentum +${roc10.toFixed(2)}%/10m`);
+  else if (roc10 < -0.12) add(-0.8, `momentum ${roc10.toFixed(2)}%/10m`);
+  if (r <= 32) add(1.2, `RSI ${r.toFixed(0)} oversold`);
+  else if (r >= 68) add(-1.2, `RSI ${r.toFixed(0)} overbought`);
+  if (price > hi20) add(1.5, '20-bar breakout up');
+  else if (price < lo20) add(-1.5, '20-bar breakdown');
 
-  if (crossedUp && r < 72) {
-    signal = 'BUY'; setup_type = 'BOS';
-    confidence = clamp(Math.round(71 + Math.abs(spreadPct) * 10 + Math.max(0, 50 - r) / 4), 0, 95);
-  } else if (crossedDown && r > 28) {
-    signal = 'SELL'; setup_type = 'MSS';
-    confidence = clamp(Math.round(71 + Math.abs(spreadPct) * 10 + Math.max(0, r - 50) / 4), 0, 95);
-  } else if (sNow > lNow && r < 34) {
-    signal = 'BUY'; setup_type = 'OB';
-    confidence = clamp(Math.round(60 + (34 - r) * 1.2), 0, 90);
-  } else if (sNow < lNow && r > 66) {
-    signal = 'SELL'; setup_type = 'OB';
-    confidence = clamp(Math.round(60 + (r - 66) * 1.2), 0, 90);
+  let signal = 'HOLD', setup_type = 'NONE', confidence;
+  if (score >= 1.8) signal = 'BUY';
+  else if (score <= -1.8) signal = 'SELL';
+
+  if (signal !== 'HOLD') {
+    const factors = signal === 'BUY' ? bull : bear;
+    setup_type = factors.some((f) => f.includes('cross')) ? (signal === 'BUY' ? 'BOS' : 'MSS')
+      : factors.some((f) => f.includes('break')) ? 'BOS'
+      : factors.some((f) => f.includes('RSI')) ? 'OB'
+      : 'OTHER';
+    confidence = clamp(Math.round(52 + Math.abs(score) * 9), 0, 95);
   } else {
-    confidence = clamp(Math.round(30 + Math.abs(spreadPct) * 5), 0, 60);
+    confidence = clamp(Math.round(32 + Math.abs(score) * 8), 0, 59);
   }
 
-  const trend = sNow > lNow ? 'bullish' : sNow < lNow ? 'bearish' : 'ranging';
-  const reasoning =
-    `${trend} (SMA7 ${sNow.toFixed(2)} vs SMA25 ${lNow.toFixed(2)}, ${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%), ` +
-    `RSI ${r.toFixed(0)}` +
-    (crossedUp ? ' — fresh bullish cross.' : crossedDown ? ' — fresh bearish cross.' :
-      signal === 'BUY' ? ' — pullback in uptrend.' : signal === 'SELL' ? ' — exhaustion in downtrend.' : ' — no clean setup.');
+  const side = score > 0.5 ? 'bullish' : score < -0.5 ? 'bearish' : 'ranging';
+  const factors = (score >= 0 ? bull : bear).join(', ') || 'no aligned factors';
+  const reasoning = `${side} — ${factors} (score ${score > 0 ? '+' : ''}${score.toFixed(1)}, RSI ${r.toFixed(0)})` +
+    (signal === 'HOLD' ? '; not enough agreement to act.' : '.');
 
   return { signal, confidence, reasoning, setup_type };
 }

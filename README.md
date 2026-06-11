@@ -70,8 +70,10 @@ Selling always closes the whole position.
 
 ## AI analysis (optional)
 
-Out of the box the app uses a local **SMA-cross + RSI heuristic** — free and
-fully offline. To switch the analyzer to a real AI model, paste an API key
+Out of the box the app uses a local **multi-signal heuristic** (EMA trend +
+fresh cross + momentum + RSI extremes + 20-bar breakout, combined into a
+weighted score) — free and fully offline. To switch the analyzer to a real AI
+model, paste an API key
 into **Setup → AI key** and hit "Save settings". The provider is detected
 from the key itself:
 
@@ -98,9 +100,15 @@ relies on Anthropic's web-search tool).
 
 - **How much you have** — your starting balance; "Set & reset" applies it and clears history.
 - **Asset** — crypto (BTC, ETH, SOL, XRP, DOGE, ADA) or stocks (AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, SPY).
+  Switching applies instantly — chart, price and feed follow the new pick.
 - **Let it choose the trade size** — confidence-scaled position sizing (default ON).
 - **$ per trade** — fixed size of each simulated buy (when auto-size is off).
-- **Confidence threshold** — minimum analyzer confidence (0–100) to act.
+- **Confidence threshold** — minimum analyzer confidence (0–100) to open a
+  position. Signal-based exits use a lower bar (threshold − 15) — cutting a
+  position takes less evidence than opening one.
+- **Take profit / Stop loss %** — automatic exits, checked on every live price
+  tick: a position up ≥ take-profit % or down ≥ stop-loss % is sold instantly
+  (defaults +1% / −0.5%; 0 disables). These bypass threshold and cooldown.
 - **Check interval** — how often Auto-watch polls (min 5s; candle-close checks happen automatically too).
 - **Use news sentiment** — adds a Claude web-search sentiment pass (needs a Claude key).
 - **AI key** — optional; Claude (`sk-ant-…`) or NVIDIA (`nvapi-…`); stays on this device.
@@ -114,9 +122,13 @@ relies on Anthropic's web-search tool).
 2. Analyzer (Claude, an NVIDIA-hosted model, or the local heuristic) returns
    `{ signal: BUY/SELL/HOLD, confidence: 0-100, reasoning, setup_type }`.
 3. If news is on: combine with sentiment (BUY+NEGATIVE → HOLD, SELL+POSITIVE → HOLD).
-4. Paper engine executes the (simulated) trade if confidence ≥ threshold
-   (default 60), not in cooldown (1 min between trades by default), and the
-   position rules allow it (one position at a time; BUY opens it, SELL closes it).
+4. Paper engine executes the (simulated) trade if confidence clears the bar
+   (entry: threshold, default 60; exit: threshold − 15), it's not in cooldown
+   (1 min between trades by default), and the position rules allow it (one
+   position at a time; BUY opens it, SELL closes it).
+5. Independently of all that, every live price tick checks the open position
+   against take-profit/stop-loss and sells the moment one is hit. Executed
+   trades flash the whole screen green (BUY) or red (SELL).
 
 ## Project layout
 
