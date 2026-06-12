@@ -77,10 +77,20 @@ async function fetchCoinbase(sym) {
 async function fetchYahoo(sym) {
   const map = SYMBOLS[sym];
   if (!map?.yahoo) return null;
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${map.yahoo}?interval=1m&range=1d`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (!res.ok) return null;
-  const data = await res.json();
+  // Yahoo intermittently rejects non-browser callers (the Android app fetches
+  // natively) — send a browser UA and try both public hosts. Browsers ignore
+  // the user-agent header, so this is a no-op on desktop.
+  let data = null;
+  for (const host of ['query1', 'query2']) {
+    try {
+      const res = await fetch(`https://${host}.finance.yahoo.com/v8/finance/chart/${map.yahoo}?interval=1m&range=1d`, {
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' },
+      });
+      if (res.ok) { data = await res.json(); break; }
+    } catch { /* try next host */ }
+  }
+  if (!data) return null;
   const r = data?.chart?.result?.[0];
   const ts = r?.timestamp;
   const q = r?.indicators?.quote?.[0];

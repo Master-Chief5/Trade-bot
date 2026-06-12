@@ -69,9 +69,19 @@ async function getCandles(sym) {
       candles: rows.map((x) => ({ t: x[0] * 1000, o: +x[3], h: +x[2], l: +x[1], c: +x[4] })).sort((a, b) => a.t - b.t).slice(-100),
     };
   }
-  const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${meta.yahoo}?interval=1m&range=1d`, tmo);
-  if (!r.ok) throw new Error('market data unreachable');
-  const data = await r.json();
+  // Yahoo intermittently rejects non-browser callers — send a browser UA and
+  // try both public hosts before giving up (the next minute's tick retries).
+  let data = null;
+  for (const host of ['query1', 'query2']) {
+    try {
+      const r = await fetch(`https://${host}.finance.yahoo.com/v8/finance/chart/${meta.yahoo}?interval=1m&range=1d`, {
+        ...tmo,
+        headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' },
+      });
+      if (r.ok) { data = await r.json(); break; }
+    } catch { /* try next host */ }
+  }
+  if (!data) throw new Error('market data unreachable');
   const res = data?.chart?.result?.[0];
   const ts = res?.timestamp || [];
   const q = res?.indicators?.quote?.[0] || {};
@@ -340,8 +350,38 @@ async function tick() {
   const state = await loadState();
   if (!state.config.autoMode) return { skipped: 'paused' };
   const sym = state.config.symbol;
-  const { candles, source } = await getCandles(sym);
+
+  // Yahoo (stocks) rate-limits bursts of server polling — keep the last good
+  // candles in state and ride out short outages on them.
+  let candles, source;
+  try {
+    ({ candles, source } = await getCandles(sym));
+    state.candleCache = { sym, at: Date.now(), candles: candles.slice(-100), source };
+  } catch (err) {
+    const cc = state.candleCache;
+    if (cc && cc.sym === sym && Date.now() - cc.at < 5 * 60_000) {
+      candles = cc.candles;
+      source = cc.source + ' (cached)';
+    } else {
+      throw err;
+    }
+  }
   const price = candles.at(-1).c;
+
+  // Stocks outside US market hours return data frozen at the last close —
+  // don't analyze or trade (or TP/SL) against a stale price.
+  if (SYMBOLS[sym].type === 'stock' && Date.now() - candles.at(-1).t > 20 * 60_000) {
+    state.latest = {
+      time: Date.now(), price, symbol: sym, signal: 'HOLD', chartSignal: 'HOLD',
+      confidence: 0,
+      reasoning: 'Market closed — stocks trade during US market hours; trading resumes when it reopens. (Crypto runs 24/7.)',
+      setup_type: 'NONE', sentiment: 'NEUTRAL', newsSummary: null,
+      dataSource: source + ' (market closed)', analyzerSource: 'none', executed: false,
+      note: 'Waiting for the market to open.',
+    };
+    await saveState(state);
+    return { skipped: 'market closed' };
+  }
 
   if (checkRiskExit(state, sym, price, source)) {
     await saveState(state);
@@ -377,7 +417,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   try {
     if (req.method === 'GET') {
-      const state = await loadState();
+      const { candleCache: _omit, ...state } = await loadState();
       const hasKey = !!(await loadKey());
       return json({ state, hasAiKey: hasKey, now: Date.now() });
     }

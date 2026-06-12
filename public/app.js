@@ -138,7 +138,7 @@ function renderTrades(trades) {
   const body = $('tradesBody');
   if (!trades.length) {
     lastTopTradeId = null;
-    body.innerHTML = '<tr><td colspan="8" class="empty">No trades yet. Hit “Check now”, or turn on Auto-watch.</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="empty">No trades yet — it trades the moment a setup appears.</td></tr>';
     return;
   }
 

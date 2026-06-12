@@ -20,6 +20,22 @@ export async function runCycle() {
     const label = assetLabel(sym);
     const { candles, source } = await getMarket(sym);
     const price = candles[candles.length - 1].c;
+
+    // Stocks outside US market hours: the data is frozen at the last close, so
+    // analyzing it (or firing TP/SL on it) would just trade a stale price.
+    if (source.includes('(market closed)')) {
+      s.latest = {
+        time: Date.now(), price, symbol: sym, signal: 'HOLD', chartSignal: 'HOLD',
+        confidence: 0,
+        reasoning: 'Market closed — stocks trade during US market hours; this shows the last session. (Crypto runs 24/7.)',
+        setup_type: 'NONE', sentiment: 'NEUTRAL', newsSummary: null,
+        dataSource: source, analyzerSource: 'none', executed: false, note: 'Waiting for the market to open.',
+      };
+      s.marketState[sym] = { candles: candles.slice(-150), lastPrice: price, source };
+      saveState();
+      ensureFeed();
+      return getStateView();
+    }
     checkRiskExit(s, sym, price); // catch TP/SL gaps even when the tick feed is down
 
     let chart, analyzerSource;
