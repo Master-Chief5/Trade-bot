@@ -22,7 +22,9 @@
   <p class="disclaimer">
     Every trade below is <strong>simulated</strong> against a balance you choose — no real order is ever placed and no
     brokerage is touched. If you want to act on a trade, you copy it into your own account, by hand, at your own risk.
+    The bot runs <strong>in the cloud, 24/7</strong> — this app is its dashboard and remote control.
   </p>
+  <p id="connNote" class="disclaimer hidden">📡 Can't reach the bot right now — it keeps trading in the cloud on its own; this screen catches up automatically.</p>
 
   <!-- Headline: P&L vs your balance -->
   <section class="hero">
@@ -53,7 +55,6 @@
         </div>
       </div>
       <p id="reasoning" class="reasoning">Waiting for the first read…</p>
-      <p id="sentimentLine" class="sentiment hidden"></p>
       <p id="signalNote" class="note"></p>
       <canvas id="chart" width="600" height="120"></canvas>
     </div>
@@ -97,11 +98,8 @@
         <label>Check interval (sec — min 5)</label>
         <input id="pollIntervalSec" type="number" min="5" step="5" value="15" />
       </div>
-      <div class="field checkbox">
-        <label><input id="useNews" type="checkbox" /> Use news sentiment (needs AI key)</label>
-      </div>
       <div class="field">
-        <label>AI key (optional — Claude sk-ant-… or NVIDIA nvapi-…; stays on this device)</label>
+        <label>AI key (optional — Claude sk-ant-… or NVIDIA nvapi-…; saved to your bot when you hit Save)</label>
         <input id="apiKey" type="password" placeholder="sk-ant-… or nvapi-…" autocomplete="off" />
       </div>
       <div class="row">
@@ -109,41 +107,16 @@
         <button id="analyzeBtn" class="btn primary">Check now</button>
       </div>
       <div class="auto">
-        <span>Auto-watch</span>
-        <button id="autoToggle" class="toggle off">OFF</button>
+        <span>Bot on/off <span class="muted">(keeps running with the app closed)</span></span>
+        <button id="autoToggle" class="toggle off">…</button>
       </div>
     </div>
-  </section>
-
-  <!-- Cloud bot: same engine running server-side 24/7 -->
-  <section class="card">
-    <div class="card-head">
-      <h2>Cloud bot <span class="muted">— runs 24/7, even with your phone off</span></h2>
-      <span id="cloudStatus" class="chip">connecting…</span>
-    </div>
-    <div class="hero-grid">
-      <div><span class="k">Equity</span><span id="cloudEquity" class="v">—</span></div>
-      <div><span class="k">P&amp;L</span><span id="cloudPnl" class="v">—</span></div>
-      <div><span class="k">Position</span><span id="cloudPosition" class="v">—</span></div>
-      <div><span class="k">Asset</span><span id="cloudSymbol" class="v">—</span></div>
-      <div><span class="k">Last check</span><span id="cloudLastTick" class="v">—</span></div>
-      <div><span class="k">Analyzer</span><span id="cloudAnalyzer" class="v">—</span></div>
-    </div>
-    <p id="cloudLatest" class="reasoning"></p>
-    <div id="cloudTradesList" class="cloud-trades"></div>
-    <div class="row wrap">
-      <button id="cloudPauseBtn" class="btn">Pause</button>
-      <button id="cloudSyncBtn" class="btn">Send settings + AI key to cloud</button>
-      <button id="cloudResetBtn" class="btn">Reset cloud $</button>
-    </div>
-    <p class="note">The cloud bot checks the market once a minute on its own server with the settings you send it.
-      Close the app, go offline, turn the phone off — it keeps trading, and you'll see what it did here.</p>
   </section>
 
   <!-- Trade feed -->
   <section class="card">
     <div class="card-head">
-      <h2>Its trades <span class="muted">— copy any you like</span></h2>
+      <h2>Bot trades <span class="muted">— made in the cloud, even while the app is closed</span></h2>
       <span id="tradeCount" class="muted"></span>
     </div>
     <div class="table-wrap">
@@ -155,7 +128,7 @@
           </tr>
         </thead>
         <tbody id="tradesBody">
-          <tr><td colspan="8" class="empty">No trades yet — it trades the moment a setup appears.</td></tr>
+          <tr><td colspan="8" class="empty">No trades yet — the bot trades the moment a setup appears.</td></tr>
         </tbody>
       </table>
     </div>

@@ -68,37 +68,36 @@ available cash equal to its confidence (82% confident → 82% of cash).
 Untick "Let it choose the trade size" to use a fixed **$ per trade** instead.
 Selling always closes the whole position.
 
-## AI analysis (optional)
+## How the analyzers work together
 
-Out of the box the app uses a local **multi-signal heuristic** (EMA trend +
-fresh cross + momentum + RSI extremes + 20-bar breakout, combined into a
-weighted score) — free and fully offline. To switch the analyzer to a real AI
-model, paste an API key
-into **Setup → AI key** and hit "Save settings". The provider is detected
-from the key itself:
+The bot has two brains that collaborate on every check:
 
-- **Claude** (`sk-ant-…` keys): the Anthropic Messages API. Get a key at
-  [platform.claude.com](https://platform.claude.com) → API keys. Sent only to
-  `api.anthropic.com`. Works in the Android app and in desktop browsers.
+1. A **multi-signal chart-math heuristic** (EMA trend + fresh cross +
+   momentum + RSI extremes + 20-bar breakout, combined into a weighted
+   score) screens the market every minute — free, instant.
+2. An optional **AI model** is consulted whenever the decision could matter:
+   the heuristic sees a possible setup, leans strongly, or a position is
+   open. If both agree, the trade fires with boosted confidence; if the AI
+   says HOLD, it vetoes the entry; if they call opposite directions, the bot
+   stands aside. The AI also gets the heuristic's readout in its prompt.
+
+The `bot:` chip shows what ran last — `heuristic+nvidia` when they worked
+together, `heuristic · nvidia on standby` while nothing is happening, or the
+error reason when an AI call failed and chart-math carried on alone.
+
+To enable the AI half, paste an API key into **Setup → AI key** and hit Save
+(it's stored in your bot's database, in a table only the bot can read). The
+provider is detected from the key:
+
+- **Claude** (`sk-ant-…` keys): the Anthropic Messages API —
+  [platform.claude.com](https://platform.claude.com) → API keys.
 - **NVIDIA** (`nvapi-…` keys): an NVIDIA-hosted open model
-  (`meta/llama-3.3-70b-instruct`) via the OpenAI-style API at
-  [build.nvidia.com](https://build.nvidia.com). Sent only to
-  `integrate.api.nvidia.com`. Works in the Android app; plain desktop
-  browsers block it (CORS), where the analyzer falls back to the heuristic.
+  (`meta/llama-3.3-70b-instruct`) via [build.nvidia.com](https://build.nvidia.com).
 
-The key is stored only on your device (localStorage). The `analyzer:` chip in
-the header shows what actually analyzed the last check — `claude`, `nvidia`,
-or `heuristic`, including the error reason when an AI call failed and the
-heuristic stood in.
-
-**Cost note:** every check spends API credit. With a very fast check interval
-(5s = ~720 checks/hour) that adds up — the free local heuristic is unlimited.
-
-**News sentiment** works with either key. Claude searches the web itself
-(Anthropic's web-search tool); with an NVIDIA key the app fetches recent
-headlines (CryptoCompare for crypto, Yahoo Finance for stocks — free, no key)
-and has the model judge them. The verdict is cached for 3 minutes per asset so
-it doesn't burn a news call on every check.
+**Cost note:** consulting the AI spends API credit, but the screen-first
+design keeps that to decision moments rather than every check, and the bot
+never re-analyzes more than once per 15s no matter how hard the app nudges
+it. (News sentiment from earlier versions is off in the unified bot for now.)
 
 ## Settings
 
@@ -113,62 +112,57 @@ it doesn't burn a news call on every check.
 - **Take profit / Stop loss %** — automatic exits, checked on every live price
   tick: a position up ≥ take-profit % or down ≥ stop-loss % is sold instantly
   (defaults +1% / −0.5%; 0 disables). These bypass threshold and cooldown.
-- **Check interval** — how often Auto-watch polls (min 5s; candle-close checks happen automatically too).
-- **Use news sentiment** — adds a news sentiment pass (needs an AI key; see above).
-- **AI key** — optional; Claude (`sk-ant-…`) or NVIDIA (`nvapi-…`); stays on this device.
-- **Check now** — run one analysis cycle immediately.
-- **Auto-watch ON/OFF** — the watch loop. **On by default** — the app starts
-  watching the moment you open it.
+- **Check interval** — how often the open app refreshes the chart and nudges
+  the bot (min 5s; candle-close nudges happen automatically too).
+- **AI key** — optional; Claude (`sk-ant-…`) or NVIDIA (`nvapi-…`). Saved to
+  your bot when you hit Save settings.
+- **Check now** — ask the bot for an extra check immediately.
+- **Bot on/off** — pauses/resumes the bot itself (in the cloud). It keeps
+  running with the app closed; pausing here stops it everywhere.
+
+Save settings pushes everything (including the AI key) to the bot; settings
+edited while offline apply the next time Save succeeds.
 
 ## How a decision is made
 
-1. Pull the last ~100 one-minute candles for the chosen asset.
-2. Analyzer (Claude, an NVIDIA-hosted model, or the local heuristic) returns
-   `{ signal: BUY/SELL/HOLD, confidence: 0-100, reasoning, setup_type }`.
-3. If news is on: combine with sentiment (BUY+NEGATIVE → HOLD, SELL+POSITIVE → HOLD).
-4. Paper engine executes the (simulated) trade if confidence clears the bar
-   (entry: threshold, default 60; exit: threshold − 15), it's not in cooldown
-   (1 min between trades by default), and the position rules allow it (one
-   position at a time; BUY opens it, SELL closes it).
-5. Independently of all that, every live price tick checks the open position
-   against take-profit/stop-loss and sells the moment one is hit. Executed
-   trades flash the whole screen green (BUY) or red (SELL).
+There is **one bot**, and it lives in the cloud (a Supabase Edge Function,
+ticked once a minute by `pg_cron` + `pg_net`). The app is its dashboard and
+remote control — and while the app is open, it accelerates the bot: a nudge
+on every closed 1-minute candle and the instant a live tick crosses
+take-profit/stop-loss, so reactions are near-instant when you're watching
+and steady once-a-minute when you're not. Each check:
 
-## Cloud bot (24/7)
+1. Pull the last ~100 one-minute candles for the chosen asset (server-side:
+   Binance → Coinbase for crypto, Yahoo for stocks, with a short-lived candle
+   cache to ride out rate limits; stocks stand down outside US market hours).
+2. If a position is past take-profit/stop-loss, sell instantly — before any
+   analysis, bypassing threshold and cooldown.
+3. The analyzers (heuristic screen + AI confirm/veto, see above) produce
+   `{ signal, confidence, reasoning, setup_type }`.
+4. The paper engine executes if confidence clears the bar (entry: threshold,
+   default 60; exit: threshold − 15), it's not in cooldown (1 min default),
+   and position rules allow (one position at a time; BUY opens, SELL closes).
+5. Executed trades flash the whole screen green (BUY) or red (SELL) — also
+   when the app syncs in trades the bot made while it was closed.
 
-The phone can't reliably run the watch loop in the background (Android puts
-apps to sleep), so the same engine also runs **server-side** as a Supabase
-Edge Function, ticked once a minute by `pg_cron` + `pg_net`. It trades around
-the clock — phone off, offline, whatever — into its own paper portfolio
-stored in Postgres (`trade_bot_state`; an optional AI key lives in
-`trade_bot_secrets`, readable only by the function).
-
-The app's **Cloud bot** card shows its live status, P&L and recent trades
-(polled every 10s while the app is open), and can:
-
-- **Pause / Resume** the cloud loop.
-- **Send settings + AI key to cloud** — pushes your current Setup values
-  (asset, threshold, TP/SL, sizing) and your AI key from the app to the
-  server. The key travels from *your device* to *your project*, nowhere else.
-- **Reset cloud $** — fresh cloud portfolio at the balance in the box.
-
-The function source lives in `supabase/functions/trade-bot/index.ts`. The
-endpoint requires no auth (it guards only fake-money state); anyone with the
-exact URL could read or reconfigure the paper bot, which is an accepted
-trade-off for a personal tool.
+State lives in Postgres (`trade_bot_state`; the AI key in
+`trade_bot_secrets`, readable only by the function). The endpoint requires
+no auth (it guards only fake-money state); anyone with the exact URL could
+read or reconfigure the paper bot — an accepted trade-off for a personal
+tool. The function source lives in `supabase/functions/trade-bot/index.ts`.
 
 ## Project layout
 
 ```
 public/                    The whole app (vanilla HTML/CSS/JS, no build step)
   app.js                     Dashboard UI
-  js/engine.js               Watch loop + view assembly
+  js/engine.js               Chart/price upkeep for the dashboard
   js/priceFeed.js            Real-time price stream (WebSocket/poll/simulated)
   js/marketData.js           Candles: Binance/Coinbase/Yahoo + offline simulator
-  js/analyzer.js             AI analysis (Claude / NVIDIA) + local heuristic + news
-  js/paperEngine.js          Simulated buy/sell, sizing, P&L
+  js/analyzer.js             (legacy in-app analyzer; the bot embeds its own copy)
+  js/paperEngine.js          (legacy in-app engine; the bot embeds its own copy)
   js/store.js                localStorage state
-  js/cloud.js                Client for the 24/7 cloud bot
+  js/cloud.js                Client for the bot (read state, send commands)
 supabase/functions/trade-bot/index.ts  Cloud bot (Supabase Edge Function)
 src/server.js              Tiny static server for desktop use
 capacitor.config.json      Android wrapper config

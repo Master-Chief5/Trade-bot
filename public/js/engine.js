@@ -1,131 +1,56 @@
-// The watch-cycle "brain" — what src/server.js used to run on the backend, now
-// running entirely in the page so the app works standalone (including as the
-// Android app, with no computer involved).
+// Market upkeep for the dashboard: candles + live price feed for whichever
+// asset is selected. All trading decisions live in the cloud bot
+// (supabase/functions/trade-bot); while the app is open it nudges that bot,
+// and this module only keeps the chart and price fresh.
 import { getState, saveState } from './store.js';
-import { getMarket, supportedSymbols, symbolGroups, assetLabel } from './marketData.js';
-import {
-  analyzeWithAI, analyzeHeuristic, analyzeNews, combineDecision, hasAiKey, aiName,
-} from './analyzer.js';
-import { applyDecision, portfolioView, checkRiskExit } from './paperEngine.js';
-import { ensureFeed, onCandleClose, onTick, feedAlive } from './priceFeed.js';
+import { getMarket, supportedSymbols, symbolGroups } from './marketData.js';
+import { ensureFeed, feedAlive } from './priceFeed.js';
 
-// --- Core watch cycle ------------------------------------------------------
-let cycleRunning = false;
-export async function runCycle() {
-  if (cycleRunning) return getStateView();
-  cycleRunning = true;
+let refreshing = false;
+export async function refreshMarket() {
+  if (refreshing) return getMarketView();
+  refreshing = true;
   try {
     const s = getState();
     const sym = s.config.symbol;
-    const label = assetLabel(sym);
     const { candles, source } = await getMarket(sym);
-    const price = candles[candles.length - 1].c;
-
-    // Stocks outside US market hours: the data is frozen at the last close, so
-    // analyzing it (or firing TP/SL on it) would just trade a stale price.
-    if (source.includes('(market closed)')) {
-      s.latest = {
-        time: Date.now(), price, symbol: sym, signal: 'HOLD', chartSignal: 'HOLD',
-        confidence: 0,
-        reasoning: 'Market closed — stocks trade during US market hours; this shows the last session. (Crypto runs 24/7.)',
-        setup_type: 'NONE', sentiment: 'NEUTRAL', newsSummary: null,
-        dataSource: source, analyzerSource: 'none', executed: false, note: 'Waiting for the market to open.',
-      };
-      s.marketState[sym] = { candles: candles.slice(-150), lastPrice: price, source };
-      saveState();
-      ensureFeed();
-      return getStateView();
-    }
-    checkRiskExit(s, sym, price); // catch TP/SL gaps even when the tick feed is down
-
-    let chart, analyzerSource;
-    const ai = aiName(); // 'claude' | 'nvidia' | null, from the saved key
-    const position = s.portfolio.position?.symbol === sym ? s.portfolio.position : null;
-    if (ai) {
-      try {
-        chart = await analyzeWithAI(label, candles, position);
-        analyzerSource = ai;
-      } catch (err) {
-        chart = analyzeHeuristic(sym, candles);
-        analyzerSource = `heuristic (${ai} error: ${err.message})`;
-      }
-    } else {
-      chart = analyzeHeuristic(sym, candles);
-      analyzerSource = 'heuristic';
-    }
-
-    let sentiment = 'NEUTRAL', newsSummary = null;
-    if (s.config.useNews && hasAiKey()) {
-      const news = await analyzeNews(sym, label);
-      sentiment = news.sentiment;
-      newsSummary = news.summary;
-    }
-
-    const finalSignal = combineDecision(chart.signal, sentiment, s.config.useNews);
-    applyDecision(s, { finalSignal, chart, sentiment, price, dataSource: source, analyzerSource, newsSummary });
-
     s.marketState[sym] = s.marketState[sym] || {};
     s.marketState[sym].candles = candles.slice(-150);
-    s.marketState[sym].lastPrice = price;
+    s.marketState[sym].lastPrice = candles[candles.length - 1].c;
     s.marketState[sym].source = source;
     saveState();
     ensureFeed(); // keep the live price stream matched to symbol + data source
   } catch (err) {
-    console.error('Cycle error:', err.message);
+    console.error('Market refresh error:', err.message);
   } finally {
-    cycleRunning = false;
+    refreshing = false;
   }
-  return getStateView();
+  return getMarketView();
 }
 
-// When the live stream reports a finished 1-minute candle, make a decision on
-// it right away (in addition to the interval timer) while Auto-watch is on.
-onCandleClose(() => {
-  if (getState().config.autoMode) runCycle();
-});
-
-// Take-profit / stop-loss runs on every live tick — exits fire within a
-// second of the price touching a target instead of waiting for a cycle.
-onTick((price) => {
-  const s = getState();
-  checkRiskExit(s, s.config.symbol, price);
-});
-
-// --- Auto-mode scheduler ----------------------------------------------------
-// Runs while the app is open; there is no server, so closing the app pauses
-// the watch loop until it's opened again.
+// Periodic chart refresh while the app is open (the cloud bot has its own
+// once-a-minute clock regardless).
 let pollTimer = null;
 export function reschedule() {
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = null;
-  const s = getState();
-  if (s.config.autoMode) {
-    const sec = Math.max(5, Number(s.config.pollIntervalSec) || 15);
-    pollTimer = setInterval(runCycle, sec * 1000);
-    runCycle(); // fire one immediately
-  }
+  const sec = Math.max(5, Number(getState().config.pollIntervalSec) || 15);
+  pollTimer = setInterval(refreshMarket, sec * 1000);
+  refreshMarket();
 }
 
-// --- View assembly -----------------------------------------------------------
-export function getStateView() {
+export function getMarketView() {
   const s = getState();
   const sym = s.config.symbol;
   const ms = s.marketState[sym] || {};
   const candles = ms.candles || [];
-  const price = candles.length ? candles[candles.length - 1].c : (ms.lastPrice || 0);
   return {
-    paperMode: true,
     config: s.config,
+    symbol: sym,
     dataSource: ms.source || 'none',
-    analyzerSource: aiName() || 'heuristic',
     feedLive: feedAlive(),
-    price,
-    latest: s.latest,
-    portfolio: portfolioView(s, price),
+    price: candles.length ? candles[candles.length - 1].c : (ms.lastPrice || 0),
     candles: candles.map((c) => ({ t: c.t, c: c.c })),
-    trades: s.trades.slice(0, 100),
     symbols: supportedSymbols(),
     symbolGroups: symbolGroups(),
-    autoMode: s.config.autoMode,
   };
 }

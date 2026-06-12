@@ -179,7 +179,7 @@ function extractJson(text) {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-async function analyzeWithAI(key, sym, candles, position) {
+async function analyzeWithAI(key, sym, candles, position, heur) {
   const meta = SYMBOLS[sym];
   const label = meta.type === 'stock' ? `${sym} (US stock/ETF)` : `${sym}/USD (crypto)`;
   const recent = candles.slice(-60).map((c) => [+c.o.toFixed(6), +c.h.toFixed(6), +c.l.toFixed(6), +c.c.toFixed(6)]);
@@ -187,7 +187,10 @@ async function analyzeWithAI(key, sym, candles, position) {
   const posLine = position
     ? `\nOpen position: entered at ${position.avgPrice}, currently ${(((last - position.avgPrice) / position.avgPrice) * 100).toFixed(2)}% from entry — SELL exits it, BUY is not possible.`
     : '\nNo open position — BUY would open one, SELL is not possible.';
-  const userText = `Asset: ${label}\nCurrent price: ${last}\nRecent 1m candles as [open, high, low, close], oldest first:\n${JSON.stringify(recent)}${posLine}`;
+  const heurLine = heur
+    ? `\nIndependent chart-math readout: ${heur.reasoning} Its call: ${heur.signal} (${heur.confidence}%). Weigh it, but judge for yourself.`
+    : '';
+  const userText = `Asset: ${label}\nCurrent price: ${last}\nRecent 1m candles as [open, high, low, close], oldest first:\n${JSON.stringify(recent)}${posLine}${heurLine}`;
 
   let out;
   if (key.startsWith('nvapi-')) {
@@ -388,20 +391,58 @@ async function tick() {
     return { riskExit: true, trade: state.trades[0] };
   }
 
+  // The app nudges this endpoint on candle closes and TP/SL crossings while
+  // it's open — risk exits above always run, but don't re-analyze (and spend
+  // AI credit) more than once per 15s.
+  if (state.latest && state.latest.symbol === sym && Date.now() - state.latest.time < 15_000) {
+    return { skipped: 'recent analysis' };
+  }
+
+  // The two analyzers work as one: the free chart-math screens every check,
+  // and the AI is consulted when it could change an action — a possible entry
+  // (heuristic non-HOLD or leaning), or any open position. Agreement boosts
+  // confidence; an AI HOLD vetoes; opposite calls mean stand aside.
   const key = await loadKey();
   const position = state.portfolio.position?.symbol === sym ? state.portfolio.position : null;
-  let chart, analyzerSource;
-  if (key) {
+  const heur = analyzeHeuristic(candles);
+  let chart = heur;
+  let analyzerSource = 'heuristic';
+  const aiName = key ? (key.startsWith('nvapi-') ? 'nvidia' : 'claude') : null;
+  const worthAsking = !!key && (heur.signal !== 'HOLD' || heur.confidence >= 42 || !!position);
+  if (worthAsking) {
     try {
-      chart = await analyzeWithAI(key, sym, candles, position);
-      analyzerSource = key.startsWith('nvapi-') ? 'nvidia' : 'claude';
+      const ai = await analyzeWithAI(key, sym, candles, position, heur);
+      if (ai.signal === heur.signal && ai.signal !== 'HOLD') {
+        chart = {
+          signal: ai.signal,
+          confidence: clamp(Math.max(ai.confidence, heur.confidence) + 5, 0, 97),
+          reasoning: `Chart math and AI agree ${ai.signal} — ${ai.reasoning} [math: ${heur.reasoning}]`.slice(0, 290),
+          setup_type: ai.setup_type !== 'NONE' ? ai.setup_type : heur.setup_type,
+        };
+      } else if (ai.signal === 'HOLD' && heur.signal !== 'HOLD') {
+        chart = {
+          signal: 'HOLD', confidence: ai.confidence,
+          reasoning: `AI vetoed the chart-math ${heur.signal} — ${ai.reasoning}`.slice(0, 290),
+          setup_type: 'NONE',
+        };
+      } else if (heur.signal === 'HOLD' && ai.signal !== 'HOLD') {
+        chart = { ...ai, reasoning: `AI: ${ai.reasoning} (chart math saw no setup)`.slice(0, 290) };
+      } else if (ai.signal !== heur.signal) {
+        chart = {
+          signal: 'HOLD', confidence: 45,
+          reasoning: `Analyzers disagree (math ${heur.signal} vs AI ${ai.signal}) — standing aside.`,
+          setup_type: 'NONE',
+        };
+      } else {
+        chart = ai; // both HOLD
+      }
+      analyzerSource = `heuristic+${aiName}`;
     } catch (err) {
-      chart = analyzeHeuristic(candles);
-      analyzerSource = `heuristic (${key.startsWith('nvapi-') ? 'nvidia' : 'claude'} error: ${err.message})`;
+      chart = heur;
+      analyzerSource = `heuristic (${aiName} error: ${err.message})`;
     }
-  } else {
-    chart = analyzeHeuristic(candles);
-    analyzerSource = 'heuristic';
+  } else if (key) {
+    analyzerSource = `heuristic · ${aiName} on standby`;
   }
 
   applyDecision(state, { finalSignal: chart.signal, chart, price, dataSource: source, analyzerSource });

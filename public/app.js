@@ -1,20 +1,30 @@
-import { getState, saveState, resetPortfolio, getApiKey, setApiKey } from './js/store.js';
+// Dashboard + remote control for THE bot (which runs in the cloud 24/7).
+// The phone shows live prices and the bot's portfolio/trades, and while the
+// app is open it accelerates the bot: extra checks on candle closes and the
+// instant a take-profit/stop-loss is crossed.
+import { getState, saveState, getApiKey, setApiKey } from './js/store.js';
 import { supportedSymbols } from './js/marketData.js';
-import { runCycle, reschedule, getStateView } from './js/engine.js';
-import { onTick } from './js/priceFeed.js';
-import { fetchCloud, cloudSetConfig, cloudReset } from './js/cloud.js';
+import { refreshMarket, reschedule, getMarketView } from './js/engine.js';
+import { onTick, onCandleClose } from './js/priceFeed.js';
+import { fetchCloud, cloudSetConfig, cloudReset, cloudTick } from './js/cloud.js';
 
 const $ = (id) => document.getElementById(id);
-let lastState = null;
-let editingFields = false; // pause input overwrites while user types
+let cloud = null;           // last successful cloud fetch { state, hasAiKey, now }
+let cloudOk = false;        // is the cloud reachable right now?
+let cloudSyncedAt = 0;
+let editingFields = false;  // pause input overwrites while user types
 let prevPrice = 0;
-let lastTopTradeId; // undefined until first render, then last seen trade id
+let lastTopTradeId;         // undefined until first successful poll
 let newTradeUntil = 0;
 
 const fmt = (n, d = 2) =>
   (n < 0 ? '-' : '') + '$' + Math.abs(Number(n)).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 const fmtNum = (n, d) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
 const signClass = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : 'flat');
+const fmtAgo = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  return s < 90 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
+};
 
 function toast(msg) {
   const t = $('toast');
@@ -24,87 +34,125 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.add('hidden'), 2200);
 }
 
-function render(s) {
-  lastState = s;
-  const p = s.portfolio;
+// Light the whole screen up green (BUY) or red (SELL), with a short buzz on
+// phones that support it.
+function flashScreen(action) {
+  const f = $('screenFlash');
+  f.className = 'screen-flash ' + action.toLowerCase();
+  void f.offsetWidth; // restart the animation if one is mid-flight
+  f.classList.add('go');
+  try { navigator.vibrate?.(action === 'BUY' ? [60, 40, 60] : [140]); } catch { /* not supported */ }
+  clearTimeout(flashScreen._t);
+  flashScreen._t = setTimeout(() => (f.className = 'screen-flash'), 1200);
+}
 
-  // Headline P&L vs starting balance
-  $('startBalLabel').textContent = fmt(p.startingBalance, 0);
-  const pnlEl = $('totalPnl');
-  pnlEl.textContent = (p.totalPnl >= 0 ? '+' : '') + fmt(p.totalPnl);
-  pnlEl.className = 'hero-value ' + signClass(p.totalPnl);
-  const pctEl = $('pnlPct');
-  pctEl.textContent = (p.pnlPct >= 0 ? '+' : '') + p.pnlPct.toFixed(2) + '%';
-  pctEl.className = 'hero-sub ' + signClass(p.totalPnl);
+function render() {
+  const m = getMarketView();
+  const st = cloud?.state || null;
 
-  $('equity').textContent = fmt(p.equity);
-  $('cash').textContent = fmt(p.cash);
-  setSigned('realized', p.realizedPnl);
-  setSigned('unrealized', p.unrealizedPnl);
-  $('position').textContent = p.position
-    ? `${fmtNum(p.position.qty, 6)} ${p.position.symbol} @ ${fmt(p.position.avgPrice, p.position.avgPrice < 1 ? 5 : 2)}`
-    : 'flat';
-  $('position').className = 'v';
+  // Chips: live data feed (this phone) + the bot (cloud).
+  $('dataSource').textContent = 'data: ' + m.dataSource + (m.feedLive ? ' · LIVE' : '');
+  $('dataSource').className = 'chip' + (m.feedLive ? ' chip-live' : '');
+  const botChip = $('analyzerSource');
+  if (!st) {
+    botChip.textContent = 'bot: connecting…';
+    botChip.className = 'chip';
+  } else {
+    const latest = st.latest;
+    const fresh = latest && Date.now() - latest.time < 3 * 60_000;
+    const an = latest?.analyzerSource || (cloud.hasAiKey ? 'heuristic+AI' : 'heuristic');
+    botChip.textContent = 'bot: ' + (!cloudOk ? 'offline · still trading' : !st.config.autoMode ? 'paused' : fresh ? 'running' : 'waiting') + ' · ' + an;
+    botChip.className = 'chip' + (cloudOk && st.config.autoMode && fresh ? ' chip-live' : '');
+  }
+  $('connNote').classList.toggle('hidden', cloudOk);
+  if (!cloudOk && cloudSyncedAt) {
+    $('connNote').textContent =
+      `📡 Can't reach the bot right now — it keeps trading in the cloud on its own. Showing what it had done as of ${fmtAgo(cloudSyncedAt)}; this screen catches up automatically.`;
+  }
 
-  // Price, with a flash on every live change
+  // Hero: the bot's portfolio, with the live price filling in unrealized P&L
+  // between cloud syncs.
+  if (st) {
+    const pf = st.portfolio;
+    const pos = pf.position;
+    const posPrice = pos
+      ? (pos.symbol === m.symbol && m.price ? m.price
+        : st.latest && st.latest.symbol === pos.symbol ? st.latest.price
+        : pos.avgPrice)
+      : 0;
+    const equity = pf.cash + (pos ? pos.qty * posPrice : 0);
+    const unrealized = pos ? (posPrice - pos.avgPrice) * pos.qty : 0;
+    const totalPnl = equity - pf.startingBalance;
+    const pnlPct = pf.startingBalance ? (totalPnl / pf.startingBalance) * 100 : 0;
+
+    $('startBalLabel').textContent = fmt(pf.startingBalance, 0);
+    const pnlEl = $('totalPnl');
+    pnlEl.textContent = (totalPnl >= 0 ? '+' : '') + fmt(totalPnl);
+    pnlEl.className = 'hero-value ' + signClass(totalPnl);
+    const pctEl = $('pnlPct');
+    pctEl.textContent = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
+    pctEl.className = 'hero-sub ' + signClass(totalPnl);
+    $('equity').textContent = fmt(equity);
+    $('cash').textContent = fmt(pf.cash);
+    setSigned('realized', pf.realizedPnl);
+    setSigned('unrealized', unrealized);
+    $('position').textContent = pos
+      ? `${fmtNum(pos.qty, 6)} ${pos.symbol} @ ${fmt(pos.avgPrice, pos.avgPrice < 1 ? 5 : 2)}`
+      : 'flat';
+    $('position').className = 'v';
+  }
+
+  // Live price with a flash on every change.
   const priceEl = $('price');
-  priceEl.textContent = s.price ? fmt(s.price, s.price < 1 ? 5 : 2) : '—';
-  const dir = prevPrice && s.price && s.price !== prevPrice
-    ? (s.price > prevPrice ? 'flash-up' : 'flash-down')
+  priceEl.textContent = m.price ? fmt(m.price, m.price < 1 ? 5 : 2) : '—';
+  const dir = prevPrice && m.price && m.price !== prevPrice
+    ? (m.price > prevPrice ? 'flash-up' : 'flash-down')
     : null;
   priceEl.className = 'v';
   if (dir) { void priceEl.offsetWidth; priceEl.classList.add(dir); }
-  prevPrice = s.price;
+  prevPrice = m.price;
 
-  // Source chips
-  $('dataSource').textContent = 'data: ' + s.dataSource + (s.feedLive ? ' · LIVE' : '');
-  $('dataSource').className = 'chip' + (s.feedLive ? ' chip-live' : '');
-  // Show what actually analyzed the last cycle — including AI failures
-  // (bad key, no credit), which fall back to the heuristic with the reason.
-  $('analyzerSource').textContent = 'analyzer: ' + (s.latest?.analyzerSource || s.analyzerSource);
-
-  // Current signal
-  const L = s.latest;
-  const badge = $('signalBadge');
+  // Current signal: the bot's latest decision.
+  const L = st?.latest;
   if (L) {
+    const badge = $('signalBadge');
     badge.textContent = L.signal;
     badge.className = 'signal-badge ' + L.signal.toLowerCase();
     $('confidence').textContent = L.confidence + '%';
-    $('setupType').textContent = 'setup: ' + L.setup_type;
+    $('setupType').textContent = 'setup: ' + L.setup_type + (L.symbol ? ` · ${L.symbol}` : '');
     $('reasoning').textContent = L.reasoning;
     const note = [];
     if (L.executed) note.push('✓ executed a paper trade');
     else if (L.note) note.push(L.note);
+    note.push(`checked ${fmtAgo(L.time)}`);
     $('signalNote').textContent = note.join(' · ');
-    const sl = $('sentimentLine');
-    if (s.config.useNews && L.sentiment) {
-      sl.textContent = `News sentiment: ${L.sentiment}` + (L.newsSummary ? ` — ${L.newsSummary}` : '');
-      sl.classList.remove('hidden');
-    } else sl.classList.add('hidden');
   }
 
-  // Inputs (don't clobber while user is editing)
+  // Inputs (don't clobber while user is editing).
+  const cfg = getState().config;
   if (!editingFields) {
-    if (document.activeElement !== $('startingBalance')) $('startingBalance').value = p.startingBalance;
-    $('tradeAmount').value = s.config.tradeAmount;
-    $('autoSize').checked = !!s.config.autoSize;
-    $('confidenceThreshold').value = s.config.confidenceThreshold;
-    $('takeProfitPct').value = s.config.takeProfitPct;
-    $('stopLossPct').value = s.config.stopLossPct;
-    $('pollIntervalSec').value = s.config.pollIntervalSec;
-    $('useNews').checked = s.config.useNews;
+    if (document.activeElement !== $('startingBalance')) {
+      $('startingBalance').value = st ? st.portfolio.startingBalance : cfg.startingBalance;
+    }
+    $('tradeAmount').value = cfg.tradeAmount;
+    $('autoSize').checked = !!cfg.autoSize;
+    $('confidenceThreshold').value = cfg.confidenceThreshold;
+    $('takeProfitPct').value = cfg.takeProfitPct;
+    $('stopLossPct').value = cfg.stopLossPct;
+    $('pollIntervalSec').value = cfg.pollIntervalSec;
     if (document.activeElement !== $('apiKey')) $('apiKey').value = getApiKey();
-    buildSymbols(s);
+    buildSymbols(m, cfg);
   }
-  $('tradeAmount').disabled = !!s.config.autoSize;
+  $('tradeAmount').disabled = !!cfg.autoSize;
 
-  // Auto toggle
+  // Auto-watch = the cloud bot's on/off switch.
   const at = $('autoToggle');
-  at.textContent = s.autoMode ? 'ON' : 'OFF';
-  at.className = 'toggle ' + (s.autoMode ? 'on' : 'off');
+  const auto = st ? st.config.autoMode : null;
+  at.textContent = auto === null ? '…' : auto ? 'ON' : 'OFF';
+  at.className = 'toggle ' + (auto ? 'on' : 'off');
 
-  renderTrades(s.trades);
-  drawChart(s.candles);
+  renderTrades(st?.trades || []);
+  drawChart(m.candles);
 }
 
 function setSigned(id, v) {
@@ -113,12 +161,12 @@ function setSigned(id, v) {
   el.className = 'v ' + signClass(v);
 }
 
-function buildSymbols(s) {
+function buildSymbols(m, cfg) {
   const sel = $('symbol');
-  const flat = s.symbols || [];
-  if (sel.options.length === flat.length && sel.value === s.config.symbol) return;
+  const flat = m.symbols || [];
+  if (sel.options.length === flat.length && sel.value === cfg.symbol) return;
   sel.innerHTML = '';
-  const groups = s.symbolGroups || { crypto: flat, stocks: [] };
+  const groups = m.symbolGroups || { crypto: flat, stocks: [] };
   for (const [label, syms] of [['Crypto', groups.crypto], ['Stocks & ETFs', groups.stocks]]) {
     if (!syms || !syms.length) continue;
     const og = document.createElement('optgroup');
@@ -126,7 +174,7 @@ function buildSymbols(s) {
     syms.forEach((sym) => {
       const o = document.createElement('option');
       o.value = sym; o.textContent = sym;
-      if (sym === s.config.symbol) o.selected = true;
+      if (sym === cfg.symbol) o.selected = true;
       og.appendChild(o);
     });
     sel.appendChild(og);
@@ -138,11 +186,12 @@ function renderTrades(trades) {
   const body = $('tradesBody');
   if (!trades.length) {
     lastTopTradeId = null;
-    body.innerHTML = '<tr><td colspan="8" class="empty">No trades yet — it trades the moment a setup appears.</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="empty">No trades yet — the bot trades the moment a setup appears.</td></tr>';
     return;
   }
 
-  // Flash the newest row — and the whole screen — when a trade just landed.
+  // Flash the newest row — and the whole screen — when a trade just landed
+  // (including trades it made while the app was closed and just synced in).
   const top = trades[0].id;
   if (lastTopTradeId !== undefined && lastTopTradeId !== null && top !== lastTopTradeId) {
     newTradeUntil = Date.now() + 1600;
@@ -151,7 +200,7 @@ function renderTrades(trades) {
   lastTopTradeId = top;
   const flashTop = Date.now() < newTradeUntil;
 
-  body.innerHTML = trades.map((t, i) => {
+  body.innerHTML = trades.slice(0, 100).map((t, i) => {
     const d = new Date(t.time);
     const time = d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const dec = t.price < 1 ? 5 : 2;
@@ -171,18 +220,6 @@ function renderTrades(trades) {
   body.querySelectorAll('.copy-btn').forEach((btn) => {
     btn.addEventListener('click', () => copyTrade(trades[+btn.dataset.i]));
   });
-}
-
-// Light the whole screen up green (BUY) or red (SELL), with a short buzz on
-// phones that support it.
-function flashScreen(action) {
-  const f = $('screenFlash');
-  f.className = 'screen-flash ' + action.toLowerCase();
-  void f.offsetWidth; // restart the animation if one is mid-flight
-  f.classList.add('go');
-  try { navigator.vibrate?.(action === 'BUY' ? [60, 40, 60] : [140]); } catch { /* not supported */ }
-  clearTimeout(flashScreen._t);
-  flashScreen._t = setTimeout(() => (f.className = 'screen-flash'), 1200);
 }
 
 function copyTrade(t) {
@@ -221,28 +258,55 @@ function drawChart(candles) {
   ctx.stroke();
 }
 
+// --- Cloud sync ---------------------------------------------------------------
+async function pollCloud() {
+  try {
+    cloud = await fetchCloud();
+    cloudOk = true;
+    cloudSyncedAt = Date.now();
+  } catch {
+    cloudOk = false;
+  }
+  render();
+}
+
+// Nudge the bot for an extra check (it ignores nudges more often than ~15s).
+let lastKick = 0;
+async function kickCloud(force = false) {
+  if (!force && Date.now() - lastKick < 8000) return;
+  lastKick = Date.now();
+  try {
+    await cloudTick();
+    await pollCloud();
+  } catch { /* offline — the bot's own clock keeps it going */ }
+}
+
+// While watching: decide on every closed 1-minute candle…
+onCandleClose(() => {
+  if (cloudOk && cloud?.state?.config.autoMode) kickCloud();
+});
+
+// …and exit the instant a live tick crosses take-profit/stop-loss.
+onTick((price) => {
+  const st = cloud?.state;
+  const pos = st?.portfolio.position;
+  if (cloudOk && pos && pos.symbol === getState().config.symbol && price > 0) {
+    const movePct = ((price - pos.avgPrice) / pos.avgPrice) * 100;
+    const tp = Number(st.config.takeProfitPct) || 0;
+    const sl = Number(st.config.stopLossPct) || 0;
+    if ((tp > 0 && movePct >= tp) || (sl > 0 && movePct <= -sl)) kickCloud();
+  }
+});
+
 // --- Actions ---------------------------------------------------------------
 $('analyzeBtn').addEventListener('click', async () => {
   $('analyzeBtn').textContent = 'Checking…';
-  render(await runCycle());
+  await kickCloud(true);
   $('analyzeBtn').textContent = 'Check now';
+  if (!cloudOk) toast('Bot unreachable — it still checks once a minute on its own');
 });
 
-// Switching the asset takes effect immediately — no "Save settings" needed.
-// (It used to wait for Save, and the periodic re-render would even snap the
-// dropdown back to the old asset, so switching looked broken.)
-$('symbol').addEventListener('change', async () => {
-  const s = getState();
-  const sym = $('symbol').value;
-  if (!supportedSymbols().includes(sym) || s.config.symbol === sym) return;
-  s.config.symbol = sym;
-  saveState();
-  toast(`Watching ${sym}`);
-  reschedule();              // realign the timer; kicks a cycle when auto-watch is on
-  render(await runCycle());  // and load the new chart even when it's off
-});
-
-$('saveBtn').addEventListener('click', () => {
+$('saveBtn').addEventListener('click', async () => {
   const s = getState();
   const nums = {
     tradeAmount: +$('tradeAmount').value,
@@ -258,30 +322,67 @@ $('saveBtn').addEventListener('click', () => {
   const sym = $('symbol').value;
   if (supportedSymbols().includes(sym)) s.config.symbol = sym;
   s.config.autoSize = $('autoSize').checked;
-  s.config.useNews = $('useNews').checked;
   setApiKey($('apiKey').value);
   saveState();
   editingFields = false;
   reschedule();
-  render(getStateView());
-  toast('Settings saved');
+  try {
+    await cloudSetConfig({
+      symbol: s.config.symbol,
+      confidenceThreshold: s.config.confidenceThreshold,
+      takeProfitPct: s.config.takeProfitPct,
+      stopLossPct: s.config.stopLossPct,
+      autoSize: s.config.autoSize,
+      tradeAmount: s.config.tradeAmount,
+      cooldownMinutes: s.config.cooldownMinutes,
+    }, getApiKey());
+    await pollCloud();
+    toast('Saved — the bot has the new settings' + (getApiKey() ? ' + AI key' : ''));
+  } catch {
+    toast('Saved on this phone — couldn\'t reach the bot, hit Save again when online');
+  }
+  render();
 });
 
-$('resetBtn').addEventListener('click', () => {
+$('resetBtn').addEventListener('click', async () => {
   const bal = +$('startingBalance').value;
   if (!(bal > 0)) return toast('Enter an amount above 0');
-  resetPortfolio(bal);
-  render(getStateView());
-  toast(`Reset — watching with ${fmt(bal, 0)}`);
+  getState().config.startingBalance = bal;
+  saveState();
+  try {
+    await cloudReset(bal);
+    await pollCloud();
+    toast(`Bot reset — trading with ${fmt(bal, 0)}`);
+  } catch {
+    toast('Bot unreachable — try again when online');
+  }
 });
 
-$('autoToggle').addEventListener('click', () => {
+$('autoToggle').addEventListener('click', async () => {
+  if (!cloud) return toast('Bot unreachable — try again when online');
+  const turningOff = cloud.state.config.autoMode;
+  try {
+    await cloudSetConfig({ autoMode: !turningOff });
+    await pollCloud();
+    toast(turningOff ? 'Bot paused' : 'Bot running');
+  } catch {
+    toast('Bot unreachable — try again when online');
+  }
+});
+
+// Switching the asset takes effect immediately — chart here, bot in the cloud.
+$('symbol').addEventListener('change', async () => {
   const s = getState();
-  s.config.autoMode = !s.config.autoMode;
+  const sym = $('symbol').value;
+  if (!supportedSymbols().includes(sym) || s.config.symbol === sym) return;
+  s.config.symbol = sym;
   saveState();
-  reschedule();
-  render(getStateView());
-  toast(s.config.autoMode ? 'Auto-watch ON' : 'Auto-watch OFF');
+  toast(`Watching ${sym}`);
+  refreshMarket().then(render);
+  try {
+    await cloudSetConfig({ symbol: sym });
+    await kickCloud(true);
+  } catch { /* bot picks it up next time Save succeeds */ }
 });
 
 ['startingBalance', 'tradeAmount', 'confidenceThreshold', 'takeProfitPct', 'stopLossPct', 'pollIntervalSec', 'apiKey'].forEach((id) => {
@@ -289,117 +390,11 @@ $('autoToggle').addEventListener('click', () => {
   $(id).addEventListener('blur', () => (editingFields = false));
 });
 
-// --- Cloud bot panel ---------------------------------------------------------
-let cloud = null;     // last fetched { state, hasAiKey, now }, null when unreachable
-let lastCloudTradeId; // undefined until first successful poll
-
-const fmtAgo = (t) => {
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  return s < 90 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
-};
-
-function renderCloud() {
-  const status = $('cloudStatus');
-  if (!cloud) {
-    status.textContent = navigator.onLine === false
-      ? 'phone offline — bot still running in the cloud'
-      : 'unreachable';
-    status.className = 'chip';
-    return;
-  }
-  const st = cloud.state;
-  const pf = st.portfolio;
-  const latest = st.latest;
-  const posPrice = pf.position
-    ? (latest && latest.symbol === pf.position.symbol ? latest.price : pf.position.avgPrice)
-    : 0;
-  const equity = pf.cash + (pf.position ? pf.position.qty * posPrice : 0);
-  const pnl = equity - pf.startingBalance;
-
-  const fresh = latest && Date.now() - latest.time < 3 * 60_000;
-  status.textContent = !st.config.autoMode ? 'paused' : fresh ? 'running · live' : 'running — waiting for next check';
-  status.className = 'chip' + (st.config.autoMode && fresh ? ' chip-live' : '');
-  $('cloudPauseBtn').textContent = st.config.autoMode ? 'Pause' : 'Resume';
-
-  $('cloudEquity').textContent = fmt(equity);
-  const pnlEl = $('cloudPnl');
-  pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmt(pnl);
-  pnlEl.className = 'v ' + signClass(pnl);
-  $('cloudPosition').textContent = pf.position ? `${fmtNum(pf.position.qty, 6)} ${pf.position.symbol}` : 'flat';
-  $('cloudSymbol').textContent = st.config.symbol;
-  $('cloudLastTick').textContent = latest ? fmtAgo(latest.time) : '—';
-  $('cloudAnalyzer').textContent = (latest?.analyzerSource || (cloud.hasAiKey ? 'AI' : 'heuristic')).split(' ')[0];
-  $('cloudLatest').textContent = latest
-    ? `${latest.signal} ${latest.confidence}% — ${latest.reasoning}`
-    : 'No checks yet.';
-
-  const trades = st.trades.slice(0, 6);
-  $('cloudTradesList').innerHTML = trades.length
-    ? trades.map((t) => {
-        const d = new Date(t.time);
-        const pnlTxt = t.realizedPnl == null ? ''
-          : ` · <span class="${signClass(t.realizedPnl)}">${(t.realizedPnl >= 0 ? '+' : '') + fmt(t.realizedPnl)}</span>`;
-        return `<div class="ct-row"><span class="t-${t.action.toLowerCase()}">${t.action}</span> ` +
-          `${fmtNum(t.qty, 6)} ${t.symbol} @ ${fmt(t.price, t.price < 1 ? 5 : 2)} (${fmt(t.amountUsd)})${pnlTxt} ` +
-          `<span class="muted">${d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>`;
-      }).join('')
-    : '<div class="muted">No cloud trades yet.</div>';
-
-  // Trades made while you were away (or just now) light the screen up too.
-  const top = trades[0]?.id || null;
-  if (lastCloudTradeId !== undefined && top && top !== lastCloudTradeId) flashScreen(trades[0].action);
-  lastCloudTradeId = top;
-}
-
-async function pollCloud() {
-  try { cloud = await fetchCloud(); } catch { cloud = null; }
-  renderCloud();
-}
-
-$('cloudPauseBtn').addEventListener('click', async () => {
-  if (!cloud) return toast('Cloud unreachable');
-  try {
-    const pausing = cloud.state.config.autoMode;
-    await cloudSetConfig({ autoMode: !pausing });
-    toast(pausing ? 'Cloud bot paused' : 'Cloud bot resumed');
-    await pollCloud();
-  } catch (e) { toast('Cloud error: ' + e.message); }
-});
-
-$('cloudSyncBtn').addEventListener('click', async () => {
-  const c = getState().config;
-  try {
-    await cloudSetConfig({
-      symbol: c.symbol,
-      confidenceThreshold: c.confidenceThreshold,
-      takeProfitPct: c.takeProfitPct,
-      stopLossPct: c.stopLossPct,
-      autoSize: c.autoSize,
-      tradeAmount: c.tradeAmount,
-      cooldownMinutes: c.cooldownMinutes,
-    }, getApiKey());
-    toast(getApiKey() ? 'Settings + AI key sent to cloud' : 'Settings sent to cloud');
-    await pollCloud();
-  } catch (e) { toast('Cloud error: ' + e.message); }
-});
-
-$('cloudResetBtn').addEventListener('click', async () => {
-  const bal = +$('startingBalance').value;
-  if (!(bal > 0)) return toast('Enter an amount above 0');
-  try {
-    await cloudReset(bal);
-    toast(`Cloud bot reset — watching with ${fmt(bal, 0)}`);
-    await pollCloud();
-  } catch (e) { toast('Cloud error: ' + e.message); }
-});
-
 // --- Boot --------------------------------------------------------------------
 $('apiKey').value = getApiKey();
-reschedule(); // resumes Auto-watch if it was left ON last time
-pollCloud();
-setInterval(pollCloud, 10_000);
-
-function tick() { render(getStateView()); }
+reschedule();          // live chart/price loop
+pollCloud();           // first bot sync
+setInterval(pollCloud, 5000);
 
 // Re-render on live price ticks (throttled), plus a steady 3s heartbeat.
 let lastTickRender = 0;
@@ -407,8 +402,8 @@ onTick(() => {
   const now = Date.now();
   if (now - lastTickRender > 800) {
     lastTickRender = now;
-    tick();
+    render();
   }
 });
-tick();
-setInterval(tick, 3000);
+render();
+setInterval(render, 3000);

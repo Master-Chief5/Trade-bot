@@ -25,3 +25,4 @@ async function post(body) {
 export const cloudSetConfig = (config, aiKey) =>
   post({ action: 'config', config, ...(aiKey !== undefined ? { aiKey } : {}) });
 export const cloudReset = (startingBalance) => post({ action: 'reset', startingBalance });
+export const cloudTick = () => post({ action: 'tick' });
