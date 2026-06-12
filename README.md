@@ -93,8 +93,12 @@ heuristic stood in.
 
 **Cost note:** every check spends API credit. With a very fast check interval
 (5s = ~720 checks/hour) that adds up — the free local heuristic is unlimited.
-"Use news sentiment" adds a second call per check (Claude keys only — it
-relies on Anthropic's web-search tool).
+
+**News sentiment** works with either key. Claude searches the web itself
+(Anthropic's web-search tool); with an NVIDIA key the app fetches recent
+headlines (CryptoCompare for crypto, Yahoo Finance for stocks — free, no key)
+and has the model judge them. The verdict is cached for 3 minutes per asset so
+it doesn't burn a news call on every check.
 
 ## Settings
 
@@ -110,7 +114,7 @@ relies on Anthropic's web-search tool).
   tick: a position up ≥ take-profit % or down ≥ stop-loss % is sold instantly
   (defaults +1% / −0.5%; 0 disables). These bypass threshold and cooldown.
 - **Check interval** — how often Auto-watch polls (min 5s; candle-close checks happen automatically too).
-- **Use news sentiment** — adds a Claude web-search sentiment pass (needs a Claude key).
+- **Use news sentiment** — adds a news sentiment pass (needs an AI key; see above).
 - **AI key** — optional; Claude (`sk-ant-…`) or NVIDIA (`nvapi-…`); stays on this device.
 - **Check now** — run one analysis cycle immediately.
 - **Auto-watch ON/OFF** — the watch loop. **On by default** — the app starts

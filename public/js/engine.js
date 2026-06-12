@@ -40,7 +40,7 @@ export async function runCycle() {
 
     let sentiment = 'NEUTRAL', newsSummary = null;
     if (s.config.useNews && hasAiKey()) {
-      const news = await analyzeNews(label);
+      const news = await analyzeNews(sym, label);
       sentiment = news.sentiment;
       newsSummary = news.summary;
     }

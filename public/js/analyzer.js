@@ -12,6 +12,7 @@
 // anthropic-dangerous-direct-browser-access header) — NVIDIA is blocked by
 // CORS there and the app falls back to the heuristic.
 import { getApiKey } from './store.js';
+import { symbolMeta } from './marketData.js';
 
 const CLAUDE_MODEL = 'claude-opus-4-8';
 const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
@@ -227,30 +228,88 @@ export function analyzeHeuristic(symbol, candles) {
   return { signal, confidence, reasoning, setup_type };
 }
 
-// --- Optional news sentiment via web search --------------------------------
-// Claude-only: it relies on the Anthropic web-search tool, which the
-// NVIDIA-hosted open models don't have.
-export async function analyzeNews(label) {
-  if (aiName() !== 'claude') return { sentiment: 'NEUTRAL', summary: 'News needs a Claude (sk-ant-…) key.' };
-  try {
-    const resp = await claudeRequest({
-      system:
-        'You are a financial markets news analyst. Use web search to find news from the last few hours about the given asset, plus any major macro/regulatory events today. Be concise.',
-      messages: [{
-        role: 'user',
-        content:
-          `Asset: ${label}. Summarize the latest short-term sentiment in one sentence, ` +
-          `then end your reply with a final line exactly in the form: SENTIMENT: POSITIVE  (or NEGATIVE or NEUTRAL).`,
-      }],
-      tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-    });
-    const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-    const m = text.match(/SENTIMENT:\s*(POSITIVE|NEGATIVE|NEUTRAL)/i);
-    const sentiment = m ? m[1].toUpperCase() : 'NEUTRAL';
-    return { sentiment, summary: text.replace(/SENTIMENT:.*$/i, '').trim().slice(0, 300) };
-  } catch (err) {
-    return { sentiment: 'NEUTRAL', summary: `News lookup failed: ${err.message}` };
+// --- Optional news sentiment ------------------------------------------------
+// Claude finds news itself via the Anthropic web-search tool. NVIDIA-hosted
+// open models have no search tool, so for them the app fetches recent
+// headlines (CryptoCompare for crypto, Yahoo Finance search for stocks — both
+// free, no key) and has the model judge those instead.
+const NEWS_CACHE_MS = 3 * 60_000; // headlines don't change every check — cache per symbol
+let newsCache = { sym: null, time: 0, result: null };
+
+async function fetchHeadlines(sym) {
+  const meta = symbolMeta(sym);
+  const headlines = [];
+  const ageMin = (tsSec) => Math.max(0, Math.round((Date.now() / 1000 - tsSec) / 60));
+
+  if (meta?.type === 'crypto') {
+    try {
+      const res = await fetch(
+        `https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${sym}`,
+        { signal: AbortSignal.timeout(8000) });
+      const data = res.ok ? await res.json() : null;
+      for (const a of (data?.Data || []).slice(0, 8)) {
+        headlines.push(`[${ageMin(a.published_on)}m ago] ${String(a.title).slice(0, 160)}`);
+      }
+    } catch { /* fall through to Yahoo */ }
   }
+  if (!headlines.length) {
+    const q = meta?.type === 'crypto' ? (meta.coinbase || sym) : sym;
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&newsCount=8&quotesCount=0`,
+      { signal: AbortSignal.timeout(8000) });
+    const data = res.ok ? await res.json() : null;
+    for (const a of (data?.news || []).slice(0, 8)) {
+      headlines.push(`[${ageMin(a.providerPublishTime)}m ago] ${String(a.title).slice(0, 160)}`);
+    }
+  }
+  return headlines;
+}
+
+const SENTIMENT_INSTRUCTION =
+  'Summarize the latest short-term sentiment in one sentence, ' +
+  'then end your reply with a final line exactly in the form: SENTIMENT: POSITIVE  (or NEGATIVE or NEUTRAL).';
+
+function parseSentiment(text) {
+  const m = text.match(/SENTIMENT:\s*(POSITIVE|NEGATIVE|NEUTRAL)/i);
+  return {
+    sentiment: m ? m[1].toUpperCase() : 'NEUTRAL',
+    summary: text.replace(/SENTIMENT:.*$/i, '').trim().slice(0, 300),
+  };
+}
+
+export async function analyzeNews(sym, label) {
+  const provider = aiName();
+  if (!provider) return { sentiment: 'NEUTRAL', summary: 'News disabled (no AI key).' };
+  if (newsCache.sym === sym && Date.now() - newsCache.time < NEWS_CACHE_MS) return newsCache.result;
+
+  let result;
+  try {
+    let text;
+    if (provider === 'claude') {
+      const resp = await claudeRequest({
+        system:
+          'You are a financial markets news analyst. Use web search to find news from the last few hours about the given asset, plus any major macro/regulatory events today. Be concise.',
+        messages: [{ role: 'user', content: `Asset: ${label}. ${SENTIMENT_INSTRUCTION}` }],
+        tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+      });
+      text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    } else {
+      const headlines = await fetchHeadlines(sym);
+      if (!headlines.length) throw new Error('no headlines reachable');
+      text = await nvidiaRequest([
+        { role: 'system', content: 'You are a financial markets news analyst. Be concise.' },
+        {
+          role: 'user',
+          content: `Asset: ${label}. Recent headlines, newest first:\n${headlines.join('\n')}\n${SENTIMENT_INSTRUCTION}`,
+        },
+      ]);
+    }
+    result = parseSentiment(text);
+  } catch (err) {
+    result = { sentiment: 'NEUTRAL', summary: `News lookup failed: ${err.message}` };
+  }
+  newsCache = { sym, time: Date.now(), result };
+  return result;
 }
 
 // Combine chart signal with news per the spec's override rules.
