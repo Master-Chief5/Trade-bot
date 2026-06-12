@@ -2,6 +2,7 @@ import { getState, saveState, resetPortfolio, getApiKey, setApiKey } from './js/
 import { supportedSymbols } from './js/marketData.js';
 import { runCycle, reschedule, getStateView } from './js/engine.js';
 import { onTick } from './js/priceFeed.js';
+import { fetchCloud, cloudSetConfig, cloudReset } from './js/cloud.js';
 
 const $ = (id) => document.getElementById(id);
 let lastState = null;
@@ -288,9 +289,115 @@ $('autoToggle').addEventListener('click', () => {
   $(id).addEventListener('blur', () => (editingFields = false));
 });
 
+// --- Cloud bot panel ---------------------------------------------------------
+let cloud = null;     // last fetched { state, hasAiKey, now }, null when unreachable
+let lastCloudTradeId; // undefined until first successful poll
+
+const fmtAgo = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  return s < 90 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
+};
+
+function renderCloud() {
+  const status = $('cloudStatus');
+  if (!cloud) {
+    status.textContent = navigator.onLine === false
+      ? 'phone offline — bot still running in the cloud'
+      : 'unreachable';
+    status.className = 'chip';
+    return;
+  }
+  const st = cloud.state;
+  const pf = st.portfolio;
+  const latest = st.latest;
+  const posPrice = pf.position
+    ? (latest && latest.symbol === pf.position.symbol ? latest.price : pf.position.avgPrice)
+    : 0;
+  const equity = pf.cash + (pf.position ? pf.position.qty * posPrice : 0);
+  const pnl = equity - pf.startingBalance;
+
+  const fresh = latest && Date.now() - latest.time < 3 * 60_000;
+  status.textContent = !st.config.autoMode ? 'paused' : fresh ? 'running · live' : 'running — waiting for next check';
+  status.className = 'chip' + (st.config.autoMode && fresh ? ' chip-live' : '');
+  $('cloudPauseBtn').textContent = st.config.autoMode ? 'Pause' : 'Resume';
+
+  $('cloudEquity').textContent = fmt(equity);
+  const pnlEl = $('cloudPnl');
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmt(pnl);
+  pnlEl.className = 'v ' + signClass(pnl);
+  $('cloudPosition').textContent = pf.position ? `${fmtNum(pf.position.qty, 6)} ${pf.position.symbol}` : 'flat';
+  $('cloudSymbol').textContent = st.config.symbol;
+  $('cloudLastTick').textContent = latest ? fmtAgo(latest.time) : '—';
+  $('cloudAnalyzer').textContent = (latest?.analyzerSource || (cloud.hasAiKey ? 'AI' : 'heuristic')).split(' ')[0];
+  $('cloudLatest').textContent = latest
+    ? `${latest.signal} ${latest.confidence}% — ${latest.reasoning}`
+    : 'No checks yet.';
+
+  const trades = st.trades.slice(0, 6);
+  $('cloudTradesList').innerHTML = trades.length
+    ? trades.map((t) => {
+        const d = new Date(t.time);
+        const pnlTxt = t.realizedPnl == null ? ''
+          : ` · <span class="${signClass(t.realizedPnl)}">${(t.realizedPnl >= 0 ? '+' : '') + fmt(t.realizedPnl)}</span>`;
+        return `<div class="ct-row"><span class="t-${t.action.toLowerCase()}">${t.action}</span> ` +
+          `${fmtNum(t.qty, 6)} ${t.symbol} @ ${fmt(t.price, t.price < 1 ? 5 : 2)} (${fmt(t.amountUsd)})${pnlTxt} ` +
+          `<span class="muted">${d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>`;
+      }).join('')
+    : '<div class="muted">No cloud trades yet.</div>';
+
+  // Trades made while you were away (or just now) light the screen up too.
+  const top = trades[0]?.id || null;
+  if (lastCloudTradeId !== undefined && top && top !== lastCloudTradeId) flashScreen(trades[0].action);
+  lastCloudTradeId = top;
+}
+
+async function pollCloud() {
+  try { cloud = await fetchCloud(); } catch { cloud = null; }
+  renderCloud();
+}
+
+$('cloudPauseBtn').addEventListener('click', async () => {
+  if (!cloud) return toast('Cloud unreachable');
+  try {
+    const pausing = cloud.state.config.autoMode;
+    await cloudSetConfig({ autoMode: !pausing });
+    toast(pausing ? 'Cloud bot paused' : 'Cloud bot resumed');
+    await pollCloud();
+  } catch (e) { toast('Cloud error: ' + e.message); }
+});
+
+$('cloudSyncBtn').addEventListener('click', async () => {
+  const c = getState().config;
+  try {
+    await cloudSetConfig({
+      symbol: c.symbol,
+      confidenceThreshold: c.confidenceThreshold,
+      takeProfitPct: c.takeProfitPct,
+      stopLossPct: c.stopLossPct,
+      autoSize: c.autoSize,
+      tradeAmount: c.tradeAmount,
+      cooldownMinutes: c.cooldownMinutes,
+    }, getApiKey());
+    toast(getApiKey() ? 'Settings + AI key sent to cloud' : 'Settings sent to cloud');
+    await pollCloud();
+  } catch (e) { toast('Cloud error: ' + e.message); }
+});
+
+$('cloudResetBtn').addEventListener('click', async () => {
+  const bal = +$('startingBalance').value;
+  if (!(bal > 0)) return toast('Enter an amount above 0');
+  try {
+    await cloudReset(bal);
+    toast(`Cloud bot reset — watching with ${fmt(bal, 0)}`);
+    await pollCloud();
+  } catch (e) { toast('Cloud error: ' + e.message); }
+});
+
 // --- Boot --------------------------------------------------------------------
 $('apiKey').value = getApiKey();
 reschedule(); // resumes Auto-watch if it was left ON last time
+pollCloud();
+setInterval(pollCloud, 10_000);
 
 function tick() { render(getStateView()); }
 

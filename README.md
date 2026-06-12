@@ -134,6 +134,29 @@ it doesn't burn a news call on every check.
    against take-profit/stop-loss and sells the moment one is hit. Executed
    trades flash the whole screen green (BUY) or red (SELL).
 
+## Cloud bot (24/7)
+
+The phone can't reliably run the watch loop in the background (Android puts
+apps to sleep), so the same engine also runs **server-side** as a Supabase
+Edge Function, ticked once a minute by `pg_cron` + `pg_net`. It trades around
+the clock — phone off, offline, whatever — into its own paper portfolio
+stored in Postgres (`trade_bot_state`; an optional AI key lives in
+`trade_bot_secrets`, readable only by the function).
+
+The app's **Cloud bot** card shows its live status, P&L and recent trades
+(polled every 10s while the app is open), and can:
+
+- **Pause / Resume** the cloud loop.
+- **Send settings + AI key to cloud** — pushes your current Setup values
+  (asset, threshold, TP/SL, sizing) and your AI key from the app to the
+  server. The key travels from *your device* to *your project*, nowhere else.
+- **Reset cloud $** — fresh cloud portfolio at the balance in the box.
+
+The function source lives in `supabase/functions/trade-bot/index.ts`. The
+endpoint requires no auth (it guards only fake-money state); anyone with the
+exact URL could read or reconfigure the paper bot, which is an accepted
+trade-off for a personal tool.
+
 ## Project layout
 
 ```
@@ -145,6 +168,8 @@ public/                    The whole app (vanilla HTML/CSS/JS, no build step)
   js/analyzer.js             AI analysis (Claude / NVIDIA) + local heuristic + news
   js/paperEngine.js          Simulated buy/sell, sizing, P&L
   js/store.js                localStorage state
+  js/cloud.js                Client for the 24/7 cloud bot
+supabase/functions/trade-bot/index.ts  Cloud bot (Supabase Edge Function)
 src/server.js              Tiny static server for desktop use
 capacitor.config.json      Android wrapper config
 .github/workflows/android.yml  Builds + publishes the APK

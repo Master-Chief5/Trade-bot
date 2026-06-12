@@ -115,6 +115,31 @@
     </div>
   </section>
 
+  <!-- Cloud bot: same engine running server-side 24/7 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>Cloud bot <span class="muted">— runs 24/7, even with your phone off</span></h2>
+      <span id="cloudStatus" class="chip">connecting…</span>
+    </div>
+    <div class="hero-grid">
+      <div><span class="k">Equity</span><span id="cloudEquity" class="v">—</span></div>
+      <div><span class="k">P&amp;L</span><span id="cloudPnl" class="v">—</span></div>
+      <div><span class="k">Position</span><span id="cloudPosition" class="v">—</span></div>
+      <div><span class="k">Asset</span><span id="cloudSymbol" class="v">—</span></div>
+      <div><span class="k">Last check</span><span id="cloudLastTick" class="v">—</span></div>
+      <div><span class="k">Analyzer</span><span id="cloudAnalyzer" class="v">—</span></div>
+    </div>
+    <p id="cloudLatest" class="reasoning"></p>
+    <div id="cloudTradesList" class="cloud-trades"></div>
+    <div class="row wrap">
+      <button id="cloudPauseBtn" class="btn">Pause</button>
+      <button id="cloudSyncBtn" class="btn">Send settings + AI key to cloud</button>
+      <button id="cloudResetBtn" class="btn">Reset cloud $</button>
+    </div>
+    <p class="note">The cloud bot checks the market once a minute on its own server with the settings you send it.
+      Close the app, go offline, turn the phone off — it keeps trading, and you'll see what it did here.</p>
+  </section>
+
   <!-- Trade feed -->
   <section class="card">
     <div class="card-head">
