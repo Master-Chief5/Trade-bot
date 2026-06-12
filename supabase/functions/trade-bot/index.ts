@@ -458,9 +458,14 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   try {
     if (req.method === 'GET') {
-      const { candleCache: _omit, ...state } = await loadState();
+      const { candleCache, ...state } = await loadState();
       const hasKey = !!(await loadKey());
-      return json({ state, hasAiKey: hasKey, now: Date.now() });
+      // The bot's own view of the chart, so the app can show it when the
+      // phone has no live feed of its own (close prices are enough to draw).
+      const chart = candleCache && candleCache.sym === state.config.symbol
+        ? candleCache.candles.map((c) => ({ t: c.t, c: c.c }))
+        : [];
+      return json({ state, hasAiKey: hasKey, chart, now: Date.now() });
     }
     const body = await req.json().catch(() => ({}));
     if (body.action === 'tick') return json(await tick());

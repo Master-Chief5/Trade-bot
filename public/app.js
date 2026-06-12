@@ -50,9 +50,18 @@ function render() {
   const m = getMarketView();
   const st = cloud?.state || null;
 
-  // Chips: live data feed (this phone) + the bot (cloud).
-  $('dataSource').textContent = 'data: ' + m.dataSource + (m.feedLive ? ' · LIVE' : '');
-  $('dataSource').className = 'chip' + (m.feedLive ? ' chip-live' : '');
+  // Only trust this phone's feed when it's genuinely live — never let the
+  // offline simulator's fake prices into the bot's view. Without a live
+  // local feed, price and chart come from the bot itself.
+  const liveLocal = m.feedLive && String(m.dataSource).startsWith('live');
+  const botPrice = st?.latest && st.latest.symbol === m.symbol ? st.latest.price : 0;
+  const shownPrice = liveLocal && m.price ? m.price : botPrice;
+
+  // Chips: data feed + the bot.
+  $('dataSource').textContent = liveLocal
+    ? 'data: ' + m.dataSource + ' · LIVE'
+    : cloudOk && botPrice ? 'data: from the bot (1-min)' : 'data: offline';
+  $('dataSource').className = 'chip' + (liveLocal ? ' chip-live' : '');
   const botChip = $('analyzerSource');
   if (!st) {
     botChip.textContent = 'bot: connecting…';
@@ -76,7 +85,7 @@ function render() {
     const pf = st.portfolio;
     const pos = pf.position;
     const posPrice = pos
-      ? (pos.symbol === m.symbol && m.price ? m.price
+      ? (liveLocal && pos.symbol === m.symbol && m.price ? m.price
         : st.latest && st.latest.symbol === pos.symbol ? st.latest.price
         : pos.avgPrice)
       : 0;
@@ -102,15 +111,15 @@ function render() {
     $('position').className = 'v';
   }
 
-  // Live price with a flash on every change.
+  // Price with a flash on every change (live feed, or the bot's last read).
   const priceEl = $('price');
-  priceEl.textContent = m.price ? fmt(m.price, m.price < 1 ? 5 : 2) : '—';
-  const dir = prevPrice && m.price && m.price !== prevPrice
-    ? (m.price > prevPrice ? 'flash-up' : 'flash-down')
+  priceEl.textContent = shownPrice ? fmt(shownPrice, shownPrice < 1 ? 5 : 2) : '—';
+  const dir = prevPrice && shownPrice && shownPrice !== prevPrice
+    ? (shownPrice > prevPrice ? 'flash-up' : 'flash-down')
     : null;
   priceEl.className = 'v';
   if (dir) { void priceEl.offsetWidth; priceEl.classList.add(dir); }
-  prevPrice = m.price;
+  prevPrice = shownPrice;
 
   // Current signal: the bot's latest decision.
   const L = st?.latest;
@@ -152,7 +161,7 @@ function render() {
   at.className = 'toggle ' + (auto ? 'on' : 'off');
 
   renderTrades(st?.trades || []);
-  drawChart(m.candles);
+  drawChart(liveLocal ? m.candles : (cloud?.chart || []));
 }
 
 function setSigned(id, v) {
@@ -288,6 +297,8 @@ onCandleClose(() => {
 
 // …and exit the instant a live tick crosses take-profit/stop-loss.
 onTick((price) => {
+  const mv = getMarketView();
+  if (!(mv.feedLive && String(mv.dataSource).startsWith('live'))) return; // never act on simulator ticks
   const st = cloud?.state;
   const pos = st?.portfolio.position;
   if (cloudOk && pos && pos.symbol === getState().config.symbol && price > 0) {
