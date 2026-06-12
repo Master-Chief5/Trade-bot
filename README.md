@@ -145,6 +145,12 @@ and steady once-a-minute when you're not. Each check:
 5. Executed trades flash the whole screen green (BUY) or red (SELL) — also
    when the app syncs in trades the bot made while it was closed.
 
+The dashboard draws a **candlestick chart** with BUY/SELL markers where the
+bot traded, and a **"money over time" graph**: the bot records its equity
+once a minute (kept in its state, thinned as it grows), so the P&L curve
+keeps building around the clock and the app draws it against a dashed
+starting-balance line.
+
 State lives in Postgres (`trade_bot_state`; the AI key in
 `trade_bot_secrets`, readable only by the function). The endpoint requires
 no auth (it guards only fake-money state); anyone with the exact URL could

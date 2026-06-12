@@ -331,6 +331,21 @@ function applyDecision(state, ctx) {
 }
 
 // --- State I/O ---------------------------------------------------------------
+// One equity point per minute, capped — the older half thins to every other
+// point when full, so the series reaches further back at lower resolution.
+function recordEquity(state, sym, price) {
+  const pf = state.portfolio;
+  const posVal = pf.position ? pf.position.qty * (pf.position.symbol === sym ? price : pf.position.avgPrice) : 0;
+  const h = state.equityHistory || (state.equityHistory = []);
+  const last = h[h.length - 1];
+  if (last && Date.now() - last.t < 55_000) return;
+  h.push({ t: Date.now(), e: +(pf.cash + posVal).toFixed(2) });
+  if (h.length > 1500) {
+    const half = Math.floor(h.length / 2);
+    state.equityHistory = h.filter((_, i) => i >= half || i % 2 === 0);
+  }
+}
+
 async function loadState() {
   const { data, error } = await supabase.from('trade_bot_state').select('state').eq('id', 1).single();
   if (error) throw new Error('state load failed: ' + error.message);
@@ -382,11 +397,13 @@ async function tick() {
       dataSource: source + ' (market closed)', analyzerSource: 'none', executed: false,
       note: 'Waiting for the market to open.',
     };
+    recordEquity(state, sym, price);
     await saveState(state);
     return { skipped: 'market closed' };
   }
 
   if (checkRiskExit(state, sym, price, source)) {
+    recordEquity(state, sym, price);
     await saveState(state);
     return { riskExit: true, trade: state.trades[0] };
   }
@@ -446,6 +463,7 @@ async function tick() {
   }
 
   applyDecision(state, { finalSignal: chart.signal, chart, price, dataSource: source, analyzerSource });
+  recordEquity(state, sym, price);
   await saveState(state);
   return { latest: state.latest, executed: state.latest.executed };
 }
@@ -458,14 +476,18 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   try {
     if (req.method === 'GET') {
-      const { candleCache, ...state } = await loadState();
+      const { candleCache, equityHistory, ...state } = await loadState();
       const hasKey = !!(await loadKey());
       // The bot's own view of the chart, so the app can show it when the
       // phone has no live feed of its own (close prices are enough to draw).
       const chart = candleCache && candleCache.sym === state.config.symbol
         ? candleCache.candles.map((c) => ({ t: c.t, c: c.c }))
         : [];
-      return json({ state, hasAiKey: hasKey, chart, now: Date.now() });
+      // Equity-over-time, decimated to ≤ ~400 points for the P&L graph.
+      const eh = equityHistory || [];
+      const step = Math.max(1, Math.ceil(eh.length / 400));
+      const equity = eh.filter((_, i) => i % step === 0 || i === eh.length - 1);
+      return json({ state, hasAiKey: hasKey, chart, equity, now: Date.now() });
     }
     const body = await req.json().catch(() => ({}));
     if (body.action === 'tick') return json(await tick());
@@ -490,6 +512,7 @@ Deno.serve(async (req) => {
       state.portfolio = { startingBalance: bal, cash: bal, position: null, realizedPnl: 0, lastTradeTime: 0 };
       state.trades = [];
       state.latest = null;
+      state.equityHistory = [];
       await saveState(state);
       return json({ ok: true });
     }

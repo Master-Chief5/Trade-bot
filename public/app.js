@@ -160,8 +160,13 @@ function render() {
   at.textContent = auto === null ? '…' : auto ? 'ON' : 'OFF';
   at.className = 'toggle ' + (auto ? 'on' : 'off');
 
-  renderTrades(st?.trades || []);
-  drawChart(liveLocal ? m.candles : (cloud?.chart || []));
+  const trades = st?.trades || [];
+  renderTrades(trades);
+  drawChart(
+    liveLocal ? m.candles : (cloud?.chart || []),
+    trades.filter((t) => t.symbol === m.symbol)
+  );
+  drawEquityChart(cloud?.equity || [], st?.portfolio.startingBalance || 0);
 }
 
 function setSigned(id, v) {
@@ -247,23 +252,98 @@ function escapeHtml(s) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
-function drawChart(candles) {
+// Price chart: candlesticks when we have full OHLC (live local feed), a plain
+// line when we only have the bot's close prices — plus BUY/SELL markers where
+// the bot traded inside the visible window.
+function drawChart(candles, trades) {
   const cv = $('chart');
   const ctx = cv.getContext('2d');
-  const w = cv.width = cv.clientWidth * (window.devicePixelRatio || 1);
-  const h = cv.height = 120 * (window.devicePixelRatio || 1);
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.width = cv.clientWidth * dpr;
+  const h = cv.height = 120 * dpr;
   ctx.clearRect(0, 0, w, h);
   if (!candles || candles.length < 2) return;
-  const xs = candles.map((c) => c.c);
-  const min = Math.min(...xs), max = Math.max(...xs);
-  const pad = 8 * (window.devicePixelRatio || 1);
-  const sx = (i) => (i / (candles.length - 1)) * (w - pad * 2) + pad;
+  const view = candles.slice(-90);
+  const isOhlc = view[0].o != null;
+  const min = Math.min(...view.map((c) => (isOhlc ? c.l : c.c)));
+  const max = Math.max(...view.map((c) => (isOhlc ? c.h : c.c)));
+  const pad = 8 * dpr;
+  const sx = (i) => (i / (view.length - 1)) * (w - pad * 2) + pad;
   const sy = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
-  const up = xs[xs.length - 1] >= xs[0];
-  ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
-  ctx.strokeStyle = up ? '#2ecc71' : '#ff5c5c';
+
+  if (isOhlc) {
+    const bw = Math.max(1.5 * dpr, ((w - pad * 2) / view.length) * 0.6);
+    view.forEach((c, i) => {
+      const x = sx(i);
+      const up = c.c >= c.o;
+      ctx.strokeStyle = ctx.fillStyle = up ? '#2ecc71' : '#ff5c5c';
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath(); ctx.moveTo(x, sy(c.h)); ctx.lineTo(x, sy(c.l)); ctx.stroke();
+      const yo = sy(c.o), yc = sy(c.c);
+      ctx.fillRect(x - bw / 2, Math.min(yo, yc), bw, Math.max(1 * dpr, Math.abs(yc - yo)));
+    });
+  } else {
+    const up = view[view.length - 1].c >= view[0].c;
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeStyle = up ? '#2ecc71' : '#ff5c5c';
+    ctx.beginPath();
+    view.forEach((c, i) => (i ? ctx.lineTo(sx(i), sy(c.c)) : ctx.moveTo(sx(i), sy(c.c))));
+    ctx.stroke();
+  }
+
+  if (trades?.length) {
+    const t0 = view[0].t, t1 = view[view.length - 1].t + 60_000;
+    for (const tr of trades) {
+      if (!(tr.time >= t0 && tr.time <= t1)) continue;
+      let idx = view.length - 1;
+      for (let i = 0; i < view.length - 1; i++) {
+        if (tr.time >= view[i].t && tr.time < view[i + 1].t) { idx = i; break; }
+      }
+      const x = sx(idx);
+      const buy = tr.action === 'BUY';
+      const edge = isOhlc ? (buy ? view[idx].l : view[idx].h) : view[idx].c;
+      const y = sy(edge) + (buy ? 10 * dpr : -10 * dpr);
+      const s = 5 * dpr;
+      ctx.fillStyle = buy ? '#2ecc71' : '#ff5c5c';
+      ctx.beginPath();
+      if (buy) { ctx.moveTo(x, y - s); ctx.lineTo(x - s, y + s); ctx.lineTo(x + s, y + s); }
+      else { ctx.moveTo(x, y + s); ctx.lineTo(x - s, y - s); ctx.lineTo(x + s, y - s); }
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
+// The bot's equity over time vs. its starting balance (dashed baseline).
+function drawEquityChart(history, startBal) {
+  const cv = $('eqChart');
+  const ctx = cv.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.width = cv.clientWidth * dpr;
+  const h = cv.height = 90 * dpr;
+  ctx.clearRect(0, 0, w, h);
+  if (!history || history.length < 2) {
+    ctx.fillStyle = '#8b97a7';
+    ctx.font = `${12 * dpr}px sans-serif`;
+    ctx.fillText('Collecting history — the bot saves one point a minute…', 8 * dpr, h / 2);
+    return;
+  }
+  const vals = history.map((p) => p.e);
+  const min = Math.min(...vals, startBal), max = Math.max(...vals, startBal);
+  const pad = 8 * dpr;
+  const sx = (i) => (i / (history.length - 1)) * (w - pad * 2) + pad;
+  const sy = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
+
+  ctx.strokeStyle = '#7d8896';
+  ctx.lineWidth = 1 * dpr;
+  ctx.setLineDash([4 * dpr, 4 * dpr]);
+  ctx.beginPath(); ctx.moveTo(pad, sy(startBal)); ctx.lineTo(w - pad, sy(startBal)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = vals[vals.length - 1] >= startBal ? '#2ecc71' : '#ff5c5c';
+  ctx.lineWidth = 2 * dpr;
   ctx.beginPath();
-  candles.forEach((c, i) => (i ? ctx.lineTo(sx(i), sy(c.c)) : ctx.moveTo(sx(i), sy(c.c))));
+  history.forEach((p, i) => (i ? ctx.lineTo(sx(i), sy(p.e)) : ctx.moveTo(sx(i), sy(p.e))));
   ctx.stroke();
 }
 

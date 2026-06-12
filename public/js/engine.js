@@ -49,7 +49,7 @@ export function getMarketView() {
     dataSource: ms.source || 'none',
     feedLive: feedAlive(),
     price: candles.length ? candles[candles.length - 1].c : (ms.lastPrice || 0),
-    candles: candles.map((c) => ({ t: c.t, c: c.c })),
+    candles: candles.map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c })),
     symbols: supportedSymbols(),
     symbolGroups: symbolGroups(),
   };
