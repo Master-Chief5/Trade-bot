@@ -198,7 +198,7 @@ Recommendations, with reasons. Any of these can be swapped if the deans or the s
 | Push notifications | Standard Web Push (VAPID keys) sent by a scheduled Supabase job | Reminders have to come from a server, because phones cannot schedule web notifications on their own. |
 | Google backup | A Supabase function with a Google service account appends rows to a sheet the dean shares with it | No OAuth screens for users. One-time setup by a dean. |
 | Hosting | Vercel (front end) + Supabase (data) | Free at this size, automatic deploys from GitHub. |
-| Code | Its own GitHub repository | This plan currently sits in the Trade-bot repo because that is where the branch was created. The app itself should not. |
+| Code | This repository | The previous paper-trading app was removed so the dorm app has a clean home. Rename the repository on GitHub from Trade-bot to something like ryan-hall-check. |
 
 **Ownership.** The Supabase project, the Vercel project, the Google account holding the backup sheet and the GitHub repository should all be owned by a school or dean account, with the head RA added as a collaborator. Students graduate. The deans should never lose the keys when that happens.
 
@@ -295,4 +295,4 @@ These are choices made for you so the plan has a shape. Push back on any of them
 - **No student logins in v1.** It halves the security surface and the support load. A sign-out kiosk can be added later if the deans want it.
 - **Offline is a Must, not a Should.** A check app that needs a signal in a hallway will be abandoned in the first week.
 - **The grade lives on the boy, not the floor.** That is what makes mixed and single-grade floors the same thing to the software.
-- **Separate repository, school-owned accounts.** The head RA changes every year or two. The tool should outlive its builder.
+- **Its own repository, school-owned accounts.** The head RA changes every year or two. The tool should outlive its builder.
