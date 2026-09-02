@@ -7,7 +7,7 @@ import type {
 import { DEFAULT_HEAD_RA_PERMISSIONS, DEFAULT_SCHEDULES, DEFAULT_STATUS_TYPES, initialState } from './defaults';
 import { uid } from './ids';
 import { nowIso, hoursSince } from './dates';
-import { boysOnFloor, defaultStatusFor, findCheck, naturalCompare } from './checks';
+import { boysOnFloor, defaultStatusFor, findCheck } from './checks';
 import { can } from './permissions';
 
 const STORAGE_KEY = 'rh-state-v1';
@@ -581,6 +581,5 @@ function addRoomsRangeDraft(d: Draft<AppState>, floorId: string, from: number, t
     d.rooms.push({ id: uid('r'), floorId, number: num, capacity, type: 'standard', sortOrder: order++ });
     added++;
   }
-  d.rooms.sort((a, b) => (a.floorId === b.floorId ? naturalCompare(a.number, b.number) : 0));
   return added;
 }
