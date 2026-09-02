@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { actions, boyName, useAppState } from '../lib/store';
 import { checksForBoy, consecutiveAbsences, floorOfBoy, roomOccupants, roomsOnFloor, sortedFloors, statusById } from '../lib/checks';
 import { formatDate, formatDateShort, formatDateTime, todayKey } from '../lib/dates';
-import { can } from '../lib/permissions';
+import { can, visibleFloorIds } from '../lib/permissions';
 import type { StaffUser } from '../lib/types';
 import { Button } from '../ui/Button';
 import { SelectInput, TextInput } from '../ui/Form';
@@ -33,7 +33,9 @@ export function BoyDetail({ user }: { user: StaffUser }) {
   const manage = can(user, 'manageBoys', perms);
   const canMove = can(user, 'moveBoys', perms) || manage;
   const seeNotes = user.role === 'dean' || state.settings.raSeeNotes;
-  const history = checksForBoy(state, boy.id, 14);
+  const seeDeanNotes = user.role === 'dean';
+  const visible = visibleFloorIds(state, user);
+  const history = checksForBoy(state, boy.id, 30).filter(({ check }) => visible.includes(check.floorId)).slice(0, 14);
   const streak = consecutiveAbsences(state, boy.id, todayKey());
   const leaves = state.leaves.filter((l) => l.boyId === boy.id && l.to >= todayKey()).sort((a, b) => a.from.localeCompare(b.from));
   const moves = state.moves.filter((m) => m.boyId === boy.id).slice(-5).reverse();
@@ -56,7 +58,7 @@ export function BoyDetail({ user }: { user: StaffUser }) {
       />
       {streak >= 3 && <Banner kind="warn" icon="flag">Absent at the last {streak} checks in a row.</Banner>}
       {boy.preferredName && <div className="small muted">Goes by {boy.preferredName}. Legal name {boy.firstName} {boy.lastName}.</div>}
-      {seeNotes && boy.deanNotes && (
+      {seeDeanNotes && boy.deanNotes && (
         <Card pad>
           <div className="eyebrow">Dean's notes</div>
           <p style={{ whiteSpace: 'pre-wrap' }}>{boy.deanNotes}</p>

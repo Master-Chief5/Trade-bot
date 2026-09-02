@@ -3,7 +3,7 @@ import { actions, useAppState } from '../lib/store';
 import { slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
 import { addDays, formatDate, formatDateLong, formatTime12, formatClock, todayKey, DAY_NAMES_LONG, weekdayOf } from '../lib/dates';
 import { can, visibleFloorIds } from '../lib/permissions';
-import { useReminders, useRemindersEnabled } from '../lib/reminders';
+import { useRemindersEnabled } from '../lib/reminders';
 import { useNow } from '../lib/useNow';
 import type { StaffUser } from '../lib/types';
 import { Button } from '../ui/Button';
@@ -17,11 +17,12 @@ export function RAHome({ user }: { user: StaffUser }) {
   const now = useNow();
   const today = todayKey();
   const [remindersOn] = useRemindersEnabled();
-  useReminders(state, user, remindersOn);
 
   const floorIds = visibleFloorIds(state, user);
   const floorNames = floorIds.map((id) => state.floors.find((f) => f.id === id)?.name).filter(Boolean).join(', ');
-  const slots = slotsForUser(state, user, today, now);
+  // A check whose deadline crosses midnight (23:50 + 20 min) stays on the list until it is done.
+  const carried = slotsForUser(state, user, addDays(today, -1), now).filter((s) => s.status !== 'submitted' && !s.pastDeadline);
+  const slots = [...carried, ...slotsForUser(state, user, today, now)];
   const escalations = can(user, 'receiveEscalations', state.headRAPermissions) ? slotsForDate(state, today, now).filter((s) => s.pastDeadline && !floorIds.includes(s.floor.id)) : [];
 
   const nextUpcoming = (() => {
@@ -37,7 +38,7 @@ export function RAHome({ user }: { user: StaffUser }) {
   const recent = submittedChecksDesc(state).filter((c) => floorIds.includes(c.floorId) && c.date >= weekAgo && c.date <= today).slice(0, 8);
 
   const start = (slot: Slot) => {
-    const id = actions.startCheck(slot.schedule.id, slot.floor.id, today, user);
+    const id = actions.startCheck(slot.schedule.id, slot.floor.id, slot.date, user);
     navigate(`/check/${id}`);
   };
 
@@ -68,7 +69,7 @@ export function RAHome({ user }: { user: StaffUser }) {
         </Card>
       )}
       {slots.map((slot) => {
-        const key = slot.schedule.id + slot.floor.id;
+        const key = slot.schedule.id + slot.floor.id + slot.date;
         const t = slot.check ? tally(slot.check, state.statusTypes) : null;
         return (
           <Card pad key={key}>
@@ -77,7 +78,7 @@ export function RAHome({ user }: { user: StaffUser }) {
                 <div>
                   <h2 style={{ fontSize: 22 }}>{slot.schedule.name}</h2>
                   <div className="muted small">
-                    {slot.floor.name} · {formatTime12(slot.schedule.time)} · {slot.check ? slot.check.entries.length : boysCount(state, slot.floor.id)} boys
+                    {slot.date !== today ? `${formatDate(slot.date)} · ` : ''}{slot.floor.name} · {formatTime12(slot.schedule.time)} · {slot.check ? slot.check.entries.length : boysCount(state, slot.floor.id)} boys
                   </div>
                 </div>
                 <SlotTag slot={slot} />

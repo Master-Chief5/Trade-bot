@@ -6,9 +6,9 @@ import type {
 } from './types';
 import { DEFAULT_HEAD_RA_PERMISSIONS, DEFAULT_SCHEDULES, DEFAULT_STATUS_TYPES, initialState } from './defaults';
 import { uid } from './ids';
-import { nowIso, hoursSince } from './dates';
+import { nowIso, hoursSince, isDateKey } from './dates';
 import { boysOnFloor, defaultStatusFor, findCheck } from './checks';
-import { can } from './permissions';
+import { can, visibleFloorIds } from './permissions';
 
 const STORAGE_KEY = 'rh-state-v1';
 
@@ -45,6 +45,21 @@ function scheduleSave() {
     saveTimer = null;
     void persistNow();
   }, 150);
+}
+
+/** Flush a pending save the moment the app is backgrounded, so the last tap survives a locked phone. */
+function flushOnHide() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    void persistNow();
+  }
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushOnHide);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushOnHide();
+  });
 }
 
 export async function persistNow(): Promise<void> {
@@ -303,8 +318,9 @@ export const actions = {
     const unmatched = new Set<string>();
     update((d) => {
       for (const row of rows) {
-        const room = row.roomNumber ? d.rooms.find((r) => r.number.toLowerCase() === row.roomNumber.toLowerCase()) : undefined;
-        if (row.roomNumber && !room) unmatched.add(row.roomNumber);
+        const matches = row.roomNumber ? d.rooms.filter((r) => r.number.toLowerCase() === row.roomNumber.toLowerCase()) : [];
+        const room = matches.length === 1 ? matches[0] : undefined;
+        if (row.roomNumber && !room) unmatched.add(matches.length > 1 ? `${row.roomNumber} (on more than one floor)` : row.roomNumber);
         const existing = d.boys.find((b) => b.firstName.toLowerCase() === row.firstName.toLowerCase() && b.lastName.toLowerCase() === row.lastName.toLowerCase());
         if (existing) {
           existing.grade = row.grade;
@@ -442,14 +458,16 @@ export const actions = {
   setEntryStatus(checkId: string, boyId: string, statusId: string) {
     update((d) => {
       const c = d.checks.find((x) => x.id === checkId);
-      const e = c?.entries.find((x) => x.boyId === boyId);
+      if (!c || c.submittedAt) return;
+      const e = c.entries.find((x) => x.boyId === boyId);
       if (e) e.statusId = statusId;
     });
   },
   cycleEntryStatus(checkId: string, boyId: string) {
     update((d) => {
       const c = d.checks.find((x) => x.id === checkId);
-      const e = c?.entries.find((x) => x.boyId === boyId);
+      if (!c || c.submittedAt) return;
+      const e = c.entries.find((x) => x.boyId === boyId);
       if (!e) return;
       const sorted = [...d.statusTypes].sort((a, b) => a.sortOrder - b.sortOrder);
       const i = sorted.findIndex((s) => s.id === e.statusId);
@@ -459,14 +477,15 @@ export const actions = {
   setEntryNote(checkId: string, boyId: string, note: string) {
     update((d) => {
       const c = d.checks.find((x) => x.id === checkId);
-      const e = c?.entries.find((x) => x.boyId === boyId);
+      if (!c || c.submittedAt) return;
+      const e = c.entries.find((x) => x.boyId === boyId);
       if (e) e.note = note.trim() || undefined;
     });
   },
   markAllDefault(checkId: string, date: string) {
     update((d) => {
       const c = d.checks.find((x) => x.id === checkId);
-      if (!c) return;
+      if (!c || c.submittedAt) return;
       c.entries.forEach((e) => { e.statusId = defaultStatusFor(d, e.boyId, date).id; });
     });
   },
@@ -489,7 +508,8 @@ export const actions = {
     const c = state.checks.find((x) => x.id === checkId);
     if (!c || !c.submittedAt) return { ok: false, error: 'Nothing to reopen.' };
     const isDean = actor.role === 'dean';
-    const headRAOk = can(actor, 'reopenCheck', state.headRAPermissions) && hoursSince(c.submittedAt) <= 24;
+    const onVisibleFloor = visibleFloorIds(state, actor).includes(c.floorId);
+    const headRAOk = onVisibleFloor && can(actor, 'reopenCheck', state.headRAPermissions) && hoursSince(c.submittedAt) <= 24;
     if (!isDean && !headRAOk) return { ok: false, error: 'Only a dean can reopen this check.' };
     update((d) => {
       const check = d.checks.find((x) => x.id === checkId);
@@ -504,6 +524,7 @@ export const actions = {
     const c = state.checks.find((x) => x.id === checkId);
     if (!c) return { ok: false, error: 'Check not found.' };
     if (c.submittedAt && actor.role !== 'dean') return { ok: false, error: 'Only a dean can delete a submitted check.' };
+    if (!c.submittedAt && actor.role !== 'dean' && c.raId !== actor.id) return { ok: false, error: 'Only the RA who started this check, or a dean, can discard it.' };
     update((d) => {
       d.checks = d.checks.filter((x) => x.id !== checkId);
       log(d, actor, 'check.delete', `${c.scheduleName} · ${c.floorName} · ${c.date}`);
@@ -513,6 +534,7 @@ export const actions = {
 
   // ----- leave -----
   addLeave(input: Omit<Leave, 'id' | 'enteredBy'>, actor: StaffUser): Result {
+    if (!isDateKey(input.from) || !isDateKey(input.to)) return { ok: false, error: 'Pick both dates.' };
     if (input.to < input.from) return { ok: false, error: 'The end date is before the start date.' };
     update((d) => {
       d.leaves.push({ ...input, reason: input.reason.trim(), id: uid('l'), enteredBy: actor.id });
@@ -537,6 +559,7 @@ export const actions = {
       d.archives.unshift({
         id: uid('y'), label: d.settings.yearLabel, archivedAt: nowIso(),
         floors: [...d.floors], rooms: [...d.rooms], boys: [...d.boys], checks: [...d.checks], leaves: [...d.leaves],
+        statusTypes: [...d.statusTypes], moves: [...d.moves],
       });
       d.boys = [];
       d.checks = [];

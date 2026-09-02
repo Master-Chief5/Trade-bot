@@ -36,6 +36,8 @@ function splitName(name: string, lastFirst: boolean): { firstName: string; lastN
  */
 export function parseRoster(text: string, knownRooms: string[], lastFirst = false): ParsedRow[] {
   const known = new Set(knownRooms.map((r) => r.toLowerCase()));
+  const counts = new Map<string, number>();
+  for (const r of knownRooms) counts.set(r.toLowerCase(), (counts.get(r.toLowerCase()) ?? 0) + 1);
   const rows: ParsedRow[] = [];
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -72,6 +74,7 @@ export function parseRoster(text: string, knownRooms: string[], lastFirst = fals
     if (grade === null) issues.push('No grade found');
     if (!roomNumber) issues.push('No room found');
     else if (!known.has(roomNumber.toLowerCase())) issues.push(`Room ${roomNumber} is not set up`);
+    else if ((counts.get(roomNumber.toLowerCase()) ?? 0) > 1) issues.push(`Room ${roomNumber} is on more than one floor; set it by hand`);
     rows.push({ firstName, lastName, grade, roomNumber, raw: line, issues });
   }
   return rows;

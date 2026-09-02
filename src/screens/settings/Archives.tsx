@@ -27,7 +27,7 @@ function ArchiveCard({ archive }: { archive: ArchivedYear }) {
   const print = () => {
     const checks = archive.checks.filter((c) => c.date === date && c.submittedAt).sort((a, b) => a.time.localeCompare(b.time));
     if (!checks.length) return toast('No submitted checks on that date.', 'error');
-    const like = { settings: state.settings, statusTypes: state.statusTypes, floors: archive.floors, rooms: archive.rooms, boys: archive.boys, checks: archive.checks };
+    const like = { settings: state.settings, statusTypes: archive.statusTypes ?? state.statusTypes, floors: archive.floors, rooms: archive.rooms, boys: archive.boys, checks: archive.checks };
     openPdf(filledSheet(like, checks), `${safeName(state.settings.dormName)}-${archive.label}-${date}.pdf`);
   };
   return (

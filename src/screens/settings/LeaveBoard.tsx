@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { actions, boyName, useAppState } from '../../lib/store';
 import { formatDate, todayKey } from '../../lib/dates';
 import type { StaffUser } from '../../lib/types';
 import { Button } from '../../ui/Button';
 import { SelectInput, TextInput } from '../../ui/Form';
-import { Card, Empty, ListRow, PageHeader, SectionLabel } from '../../ui/Layout';
+import { Card, Empty, PageHeader, SectionLabel } from '../../ui/Layout';
 import { Sheet } from '../../ui/Sheet';
 import { toast } from '../../ui/toast';
 
@@ -18,7 +19,15 @@ export function LeaveBoard({ user }: { user: StaffUser }) {
   const upcoming = withBoy.filter(({ l }) => l.from > today).sort((a, b) => a.l.from.localeCompare(b.l.from));
   const past = withBoy.filter(({ l }) => l.to < today).sort((a, b) => b.l.to.localeCompare(a.l.to)).slice(0, 30);
   const row = ({ l, boy }: (typeof withBoy)[number]) => (
-    <ListRow key={l.id} to={`/boys/${boy!.id}`} title={boyName(boy!)} subtitle={`${formatDate(l.from)} to ${formatDate(l.to)}${l.reason ? ` · ${l.reason}` : ''}`} trail={<Button variant="ghost" size="sm" onClick={(e) => { e.preventDefault(); actions.deleteLeave(l.id, user); toast('Removed'); }}>Remove</Button>} />
+    <div key={l.id} className="listrow">
+      <Link to={`/boys/${boy!.id}`} className="body" style={{ textDecoration: 'none', color: 'inherit', minHeight: 44, justifyContent: 'center' }}>
+        <span className="primary-text">{boyName(boy!)}</span>
+        <span className="secondary-text">{formatDate(l.from)} to {formatDate(l.to)}{l.reason ? ` · ${l.reason}` : ''}</span>
+      </Link>
+      <span className="trail">
+        <Button variant="ghost" size="sm" onClick={() => { actions.deleteLeave(l.id, user); toast('Removed'); }}>Remove</Button>
+      </span>
+    </div>
   );
   return (
     <>

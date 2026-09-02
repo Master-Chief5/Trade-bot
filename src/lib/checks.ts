@@ -1,5 +1,5 @@
 import type { AppState, Boy, Check, CheckSchedule, Floor, Leave, Room, StaffUser, StatusType } from './types';
-import { dateInRange, hoursSince, minutesOfDay, nowMinutes, weekdayOf } from './dates';
+import { dateInRange, hoursSince, minutesOfDay, parseKey, weekdayOf } from './dates';
 import { can, visibleFloorIds } from './permissions';
 
 type StateLike = Pick<AppState, 'floors' | 'rooms' | 'boys' | 'statusTypes' | 'leaves' | 'schedules' | 'checks' | 'headRAPermissions'>;
@@ -78,6 +78,7 @@ export type SlotStatus = 'not-started' | 'in-progress' | 'submitted';
 export interface Slot {
   schedule: CheckSchedule;
   floor: Floor;
+  date: string;
   check: Check | undefined;
   status: SlotStatus;
   /** minutes from now until the scheduled time; negative when it has passed */
@@ -85,9 +86,14 @@ export interface Slot {
   pastDeadline: boolean;
 }
 
+/** The scheduled start as a real Date, so deadlines that cross midnight still work. */
+export function slotStart(date: string, time: string): Date {
+  const d = parseKey(date);
+  d.setHours(0, minutesOfDay(time), 0, 0);
+  return d;
+}
+
 export function slotsForDate(state: StateLike, date: string, now: Date = new Date(), floorFilter?: string[]): Slot[] {
-  const isToday = date === dateKeyOf(now);
-  const nowMin = nowMinutes(now);
   const out: Slot[] = [];
   for (const schedule of schedulesForDate(state, date)) {
     for (const floorId of scheduleFloorIds(state, schedule)) {
@@ -96,18 +102,14 @@ export function slotsForDate(state: StateLike, date: string, now: Date = new Dat
       if (!floor) continue;
       const check = findCheck(state, schedule.id, floorId, date);
       const status: SlotStatus = check ? (check.submittedAt ? 'submitted' : 'in-progress') : 'not-started';
-      const start = minutesOfDay(schedule.time);
-      const minutesUntil = isToday ? start - nowMin : date < dateKeyOf(now) ? -Infinity : Infinity;
-      const pastDeadline = status !== 'submitted' && (date < dateKeyOf(now) || (isToday && nowMin > start + schedule.deadlineMinutes));
-      out.push({ schedule, floor, check, status, minutesUntil, pastDeadline });
+      const start = slotStart(date, schedule.time);
+      const minutesUntil = Math.round((start.getTime() - now.getTime()) / 60_000);
+      const deadline = start.getTime() + schedule.deadlineMinutes * 60_000;
+      const pastDeadline = status !== 'submitted' && now.getTime() > deadline;
+      out.push({ schedule, floor, date, check, status, minutesUntil, pastDeadline });
     }
   }
   return out;
-}
-
-function dateKeyOf(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 export interface Tally {
@@ -208,17 +210,23 @@ export function checksForBoy(state: Pick<AppState, 'checks'>, boyId: string, lim
   return out;
 }
 
-export function canEditCheck(state: Pick<AppState, 'headRAPermissions'>, user: StaffUser | null | undefined, check: Check): boolean {
-  if (!user) return false;
+/** Deans edit anywhere. Everyone else edits only the floors they are assigned to; "see every floor" is viewing only. */
+export function canEditCheck(_state: Pick<AppState, 'headRAPermissions'>, user: StaffUser | null | undefined, check: Check): boolean {
+  if (!user || !user.active) return false;
   if (check.submittedAt) return false;
   if (user.role === 'dean') return true;
-  if (can(user, 'viewAllFloors', state.headRAPermissions)) return true;
   return user.floorIds.includes(check.floorId);
 }
 
-export function canReopenCheck(state: Pick<AppState, 'headRAPermissions'>, user: StaffUser | null | undefined, check: Check): boolean {
+export function canDoCheckOnFloor(user: StaffUser | null | undefined, floorId: string): boolean {
+  if (!user || !user.active) return false;
+  return user.role === 'dean' || user.floorIds.includes(floorId);
+}
+
+export function canReopenCheck(state: Pick<AppState, 'headRAPermissions' | 'floors'>, user: StaffUser | null | undefined, check: Check): boolean {
   if (!user || !check.submittedAt) return false;
   if (user.role === 'dean') return true;
+  if (!visibleFloorIds(state, user).includes(check.floorId)) return false;
   return can(user, 'reopenCheck', state.headRAPermissions) && hoursSince(check.submittedAt) <= 24;
 }
 
@@ -248,14 +256,16 @@ export function roomStates(state: Pick<AppState, 'checks' | 'statusTypes' | 'boy
       continue;
     }
     let worst: RoomState = 'ok';
+    let matched = 0;
     for (const boy of boys) {
       const entry = latest.entries.find((e) => e.boyId === boy.id);
       const st = entry ? statusById(state, entry.statusId) : undefined;
       if (!st) continue;
+      matched++;
       if (st.countsAs === 'absent') worst = 'absent';
       else if (st.countsAs === 'excused' && worst === 'ok') worst = 'away';
     }
-    map.set(room.id, worst);
+    map.set(room.id, matched === 0 ? 'unchecked' : worst);
   }
   return map;
 }

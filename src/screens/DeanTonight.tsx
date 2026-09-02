@@ -1,11 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { absentOn, flaggedBoys, leaveCovering, schedulesForDate, slotsForDate, tally, type Slot } from '../lib/checks';
+import { absentOn, canDoCheckOnFloor, flaggedBoys, leaveCovering, schedulesForDate, slotsForDate, tally, type Slot } from '../lib/checks';
 import { formatClock, formatDateLong, formatTime12, todayKey } from '../lib/dates';
 import { can, printableFloorIds } from '../lib/permissions';
 import { filledSheet, openPdf, safeName } from '../lib/pdf';
 import { useNow } from '../lib/useNow';
-import { useReminders, useRemindersEnabled } from '../lib/reminders';
 import type { StaffUser } from '../lib/types';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
@@ -18,8 +17,6 @@ export function DeanTonight({ user }: { user: StaffUser }) {
   const navigate = useNavigate();
   const now = useNow();
   const today = todayKey();
-  const [remindersOn] = useRemindersEnabled();
-  useReminders(state, user, remindersOn);
 
   const schedules = schedulesForDate(state, today);
   const slots = slotsForDate(state, today, now);
@@ -30,6 +27,7 @@ export function DeanTonight({ user }: { user: StaffUser }) {
   const printable = printableFloorIds(state, user);
   const tonightChecks = state.checks.filter((c) => c.date === today && c.submittedAt && printable.includes(c.floorId)).sort((a, b) => a.time.localeCompare(b.time) || a.floorName.localeCompare(b.floorName, undefined, { numeric: true }));
   const canPrint = can(user, 'printAllFloors', state.headRAPermissions) || user.role === 'dean';
+  const showNotes = user.role === 'dean' || state.settings.raSeeNotes;
 
   const printTonight = () => {
     if (!tonightChecks.length) return toast('No submitted checks yet tonight.', 'error');
@@ -78,16 +76,17 @@ export function DeanTonight({ user }: { user: StaffUser }) {
                           : slot.pastDeadline
                             ? `Not submitted · past ${formatTime12(schedule.time)} + ${schedule.deadlineMinutes} min`
                             : 'Not started';
+                    const mayDo = canDoCheckOnFloor(user, slot.floor.id);
                     return (
                       <ListRow
                         key={slot.floor.id}
                         lead={<span className={`status-circle ${circle}`}><Icon name={icon} size={16} stroke={2.2} /></span>}
                         title={slot.floor.name}
                         subtitle={detail}
-                        to={slot.status === 'submitted' && slot.check ? `/check/${slot.check.id}` : undefined}
-                        onClick={slot.status !== 'submitted' ? () => open(slot) : undefined}
-                        trail={t ? <Counts codes={t.byCode} present={t.present} absent={t.absent} excused={t.excused} /> : <span className="tag">{slot.status === 'in-progress' ? 'Continue' : 'Start'}</span>}
-                        chevron={slot.status === 'submitted'}
+                        to={slot.check ? `/check/${slot.check.id}` : undefined}
+                        onClick={!slot.check && mayDo ? () => open(slot) : undefined}
+                        trail={t ? <Counts codes={t.byCode} present={t.present} absent={t.absent} excused={t.excused} /> : mayDo ? <span className="tag">{slot.status === 'in-progress' ? 'Continue' : 'Start'}</span> : slot.check ? <span className="tag neutral">View</span> : undefined}
+                        chevron={!!slot.check}
                       />
                     );
                   })}
@@ -101,7 +100,7 @@ export function DeanTonight({ user }: { user: StaffUser }) {
               <Empty>{submittedCount ? 'Nobody marked absent so far.' : 'Waiting for the first floor to submit.'}</Empty>
             ) : (
               absent.map(({ check, entry }) => (
-                <ListRow key={check.id + entry.boyId} to={`/boys/${entry.boyId}`} title={entry.name} subtitle={`Room ${entry.roomNumber} · ${check.floorName}${entry.note ? ` · ${entry.note}` : ''}`} chevron />
+                <ListRow key={check.id + entry.boyId} to={`/boys/${entry.boyId}`} title={entry.name} subtitle={`Room ${entry.roomNumber} · ${check.floorName}${entry.note && showNotes ? ` · ${entry.note}` : ''}`} chevron />
               ))
             )}
           </Card>

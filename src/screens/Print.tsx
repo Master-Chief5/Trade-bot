@@ -24,7 +24,10 @@ export function Print({ user }: { user: StaffUser }) {
     () => state.checks.filter((c) => c.date === date && floorIds.includes(c.floorId)).sort((a, b) => a.time.localeCompare(b.time) || a.floorName.localeCompare(b.floorName, undefined, { numeric: true })),
     [state.checks, date, floorIds],
   );
-  const submitted = checks.filter((c) => c.submittedAt);
+  const canSeeNotesOf = (c: (typeof checks)[number]) => user.role === 'dean' || state.settings.raSeeNotes || c.raId === user.id;
+  const submitted = checks
+    .filter((c) => c.submittedAt)
+    .map((c) => (canSeeNotesOf(c) ? c : { ...c, entries: c.entries.map((e) => ({ ...e, note: undefined })) }));
   const inProgress = checks.length - submitted.length;
   const monday = weekStart(date);
   const dorm = safeName(state.settings.dormName);

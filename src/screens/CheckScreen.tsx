@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
 import { canEditCheck, canReopenCheck, defaultStatus, naturalCompare, sortedStatusTypes, statusById, tally } from '../lib/checks';
 import { formatClock, formatDate, formatTime12 } from '../lib/dates';
+import { visibleFloorIds } from '../lib/permissions';
 import type { CheckEntry, StaffUser } from '../lib/types';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
@@ -37,6 +38,8 @@ export function CheckScreen({ user }: { user: StaffUser }) {
       </>
     );
   }
+
+  if (!visibleFloorIds(state, user).includes(check.floorId)) return <Navigate to="/" replace />;
 
   const editable = canEditCheck(state, user, check);
   const reopenable = canReopenCheck(state, user, check);

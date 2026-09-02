@@ -1,5 +1,5 @@
 import { useAppState } from '../../lib/store';
-import { roleLabel } from '../../lib/permissions';
+import { can, roleLabel } from '../../lib/permissions';
 import type { StaffUser } from '../../lib/types';
 import { Button } from '../../ui/Button';
 import { Card, Empty, ListRow, PageHeader, SectionLabel } from '../../ui/Layout';
@@ -7,6 +7,7 @@ import { Card, Empty, ListRow, PageHeader, SectionLabel } from '../../ui/Layout'
 export function Staff({ user }: { user: StaffUser }) {
   const state = useAppState();
   const isDean = user.role === 'dean';
+  const canManage = isDean || can(user, 'manageRAs', state.headRAPermissions);
   const floorsOf = (s: StaffUser) => s.floorIds.map((id) => state.floors.find((f) => f.id === id)?.name).filter(Boolean).join(', ');
   const groups: { label: string; role: StaffUser['role'] }[] = [
     { label: 'Deans', role: 'dean' },
@@ -16,7 +17,7 @@ export function Staff({ user }: { user: StaffUser }) {
   const inactive = state.staff.filter((s) => !s.active && (isDean || s.role === 'ra'));
   return (
     <>
-      <PageHeader back="/settings" backLabel="Settings" title="Staff" subtitle={isDean ? 'Deans, the head RA and the RAs. Each signs in with a PIN.' : 'The RAs on your team.'} actions={<Button iconOnly round icon="plus" aria-label="Add staff" to="/settings/staff/new" />} />
+      <PageHeader back="/settings" backLabel="Settings" title="Staff" subtitle={isDean ? 'Deans, the head RA and the RAs. Each signs in with a PIN.' : 'The RAs on your team.'} actions={canManage ? <Button iconOnly round icon="plus" aria-label="Add staff" to="/settings/staff/new" /> : undefined} />
       {groups.map((g) => {
         const people = state.staff.filter((s) => s.active && s.role === g.role).sort((a, b) => a.name.localeCompare(b.name));
         if (!people.length && g.role !== 'ra') return null;
@@ -25,7 +26,7 @@ export function Staff({ user }: { user: StaffUser }) {
           <div key={g.role} className="stack-sm">
             <SectionLabel>{g.label}</SectionLabel>
             <Card>
-              {people.length === 0 && <Empty>No RAs yet. Add the RAs and assign each to a floor.</Empty>}
+              {people.length === 0 && <Empty>{canManage ? 'No RAs yet. Add the RAs and assign each to a floor.' : 'No RAs yet.'}</Empty>}
               {people.map((s) => (
                 <ListRow key={s.id} to={editable ? `/settings/staff/${s.id}` : undefined} title={s.name} subtitle={`${roleLabel(s.role)}${floorsOf(s) ? ` · ${floorsOf(s)}` : s.role === 'ra' ? ' · no floor yet' : ''}${s.id === user.id ? ' · you' : ''}`} chevron={editable} />
               ))}

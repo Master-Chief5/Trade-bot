@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { actions, getState } from '../src/lib/store';
-import { canEditCheck, canReopenCheck, consecutiveAbsences, flaggedBoys, slotsForDate, tally } from '../src/lib/checks';
+import { canEditCheck, canReopenCheck, consecutiveAbsences, flaggedBoys, roomStates, slotsForDate, tally } from '../src/lib/checks';
+import { parseRoster } from '../src/lib/roster';
 import { addDays, todayKey } from '../src/lib/dates';
 import { addRA, boy, floor, setupDorm, status } from './helpers';
 
@@ -171,5 +172,79 @@ describe('status types and rollover', () => {
     expect(getState().boys).toHaveLength(5);
     expect(actions.importJson('{"nope":1}').ok).toBe(false);
     expect(actions.importJson('not json').ok).toBe(false);
+  });
+});
+
+describe('review fixes', () => {
+  let dean: ReturnType<typeof setupDorm>['dean'];
+  beforeEach(() => {
+    ({ dean } = setupDorm());
+  });
+
+  it('ignores edits to a submitted check and refuses another RA discarding it', () => {
+    const ra = addRA('Alex', ['Floor 1'], dean);
+    const other = addRA('Sam', ['Floor 1'], dean);
+    const id = actions.startCheck(getState().schedules[0].id, floor('Floor 1').id, todayKey(), ra);
+    expect(actions.deleteCheck(id, other).ok).toBe(false);
+    actions.submitCheck(id, ra);
+    actions.setEntryStatus(id, boy('Achebe').id, status('A').id);
+    actions.cycleEntryStatus(id, boy('Bell').id);
+    actions.setEntryNote(id, boy('Bell').id, 'late');
+    const check = getState().checks[0];
+    expect(check.entries.every((e) => e.statusId === status('P').id && !e.note)).toBe(true);
+  });
+
+  it('keeps a head RA from reopening a floor they cannot see, and "see every floor" is view-only', () => {
+    const head = addRA('Head', ['Floor 1'], dean, 'headra');
+    actions.setHeadRAPermissions({ ...getState().headRAPermissions, editSubmitted24h: true }, dean);
+    const id = actions.startCheck(getState().schedules[0].id, floor('Floor 2').id, todayKey(), dean);
+    actions.submitCheck(id, dean);
+    expect(actions.reopenCheck(id, head).ok).toBe(false);
+    actions.setHeadRAPermissions({ ...getState().headRAPermissions, editSubmitted24h: true, viewAllFloors: true }, dean);
+    expect(actions.reopenCheck(id, head).ok).toBe(true);
+    expect(canEditCheck(getState(), head, getState().checks[0])).toBe(false);
+  });
+
+  it('paints a room unchecked when its boys joined after the check', () => {
+    const ra = addRA('Alex', ['Floor 1'], dean);
+    actions.startCheck(getState().schedules[0].id, floor('Floor 1').id, todayKey(), ra);
+    const room104 = getState().rooms.find((r) => r.number === '104')!;
+    actions.moveBoy(boy('Reyes').id, room104.id, dean);
+    const states = roomStates(getState(), floor('Floor 1').id, todayKey());
+    expect(states.get(room104.id)).toBe('unchecked');
+    expect(states.get(getState().rooms.find((r) => r.number === '101')!.id)).toBe('ok');
+  });
+
+  it('refuses leave with missing dates', () => {
+    expect(actions.addLeave({ boyId: boy('Bell').id, from: '', to: '', reason: '' }, dean).ok).toBe(false);
+    expect(actions.addLeave({ boyId: boy('Bell').id, from: '2026-09-05', to: '2026-09-06', reason: '' }, dean).ok).toBe(true);
+  });
+
+  it('does not guess when a room number exists on two floors', () => {
+    actions.addRoom(floor('Floor 2').id, '101');
+    const res = actions.importRoster([{ firstName: 'Twin', lastName: 'Rooms', grade: 9, roomNumber: '101' }], dean);
+    expect(res.unmatchedRooms).toEqual(['101 (on more than one floor)']);
+    expect(boy('Rooms').roomId).toBeNull();
+    const parsed = parseRoster('Twin Rooms\t9\t101', getState().rooms.map((r) => r.number));
+    expect(parsed[0].issues[0]).toMatch(/more than one floor/);
+  });
+
+  it('keeps a late-night check alive past midnight', () => {
+    actions.updateSchedule(getState().schedules[0].id, { time: '23:50', deadlineMinutes: 20 });
+    const yesterday = addDays(todayKey(), -1);
+    const now = new Date();
+    now.setHours(0, 5, 0, 0);
+    const slots = slotsForDate(getState(), yesterday, now);
+    expect(slots[0].pastDeadline).toBe(false);
+    expect(slots[0].minutesUntil).toBe(-15);
+    now.setHours(0, 15, 0, 0);
+    expect(slotsForDate(getState(), yesterday, now)[0].pastDeadline).toBe(true);
+  });
+
+  it('snapshots status types and room history into the archive', () => {
+    actions.archiveYear('2027–28', dean);
+    expect(getState().archives[0].statusTypes?.map((s) => s.code)).toEqual(['P', 'A', 'AW', 'L', 'INF']);
+    expect(getState().archives[0].moves?.length).toBe(5);
+    expect(getState().moves).toHaveLength(0);
   });
 });

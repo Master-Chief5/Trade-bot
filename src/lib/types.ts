@@ -142,6 +142,9 @@ export interface ArchivedYear {
   boys: Boy[];
   checks: Check[];
   leaves: Leave[];
+  /** Snapshotted so archived sheets keep their codes even if a status is deleted later. */
+  statusTypes?: StatusType[];
+  moves?: Move[];
 }
 
 export interface Settings {

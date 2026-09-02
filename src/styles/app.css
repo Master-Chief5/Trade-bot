@@ -284,6 +284,9 @@ button.pill { cursor: pointer; }
 .check-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--rule); padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; }
 .check-footer .inner { max-width: 608px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 8px; }
 @media (min-width: 900px) { .check-footer { left: 224px; } .check-footer .inner { max-width: 640px; margin: 0; margin-left: 40px; } }
+@media (max-width: 899px) { .shell:has(.check-footer) .tabbar { display: none; } }
+body:has(.check-footer) .toaster { bottom: calc(150px + env(safe-area-inset-bottom)); }
+@media (min-width: 900px) { body:has(.check-footer) .toaster { bottom: 130px; } }
 .content.has-footer { padding-bottom: 150px; }
 .entry { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 14px; border-bottom: 1px solid var(--rule); }
 .entry:last-child { border-bottom: none; }

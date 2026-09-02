@@ -14,20 +14,37 @@ function newDoc(): jsPDF {
   return new jsPDF({ unit: 'mm', format: 'letter' });
 }
 
-function header(doc: jsPDF, lines: [string, string, string]) {
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text(lines[0], M, M + 6);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10.5);
-  doc.text(lines[1], M, M + 12.5);
-  doc.setFontSize(9.5);
-  doc.setTextColor(90);
-  doc.text(lines[2], M, M + 18);
+const TEXT_W = PAGE_W - 2 * M;
+
+/** Draws a wrapped text block and returns the y just below it. */
+function block(doc: jsPDF, text: string, y: number, size: number, opts: { bold?: boolean; grey?: boolean } = {}): number {
+  doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
+  doc.setFontSize(size);
+  doc.setTextColor(opts.grey ? 90 : 20);
+  const lines = doc.splitTextToSize(text, TEXT_W) as string[];
+  doc.text(lines, M, y);
   doc.setTextColor(0);
+  return y + lines.length * size * 0.42;
+}
+
+/** Header block; returns the y where the table should start. */
+function header(doc: jsPDF, lines: [string, string, string]): number {
+  let y = block(doc, lines[0], M + 6, 15, { bold: true });
+  y = block(doc, lines[1], y + 2, 10.5);
+  y = block(doc, lines[2], y + 1.5, 9.5, { grey: true });
   doc.setDrawColor(40);
   doc.setLineWidth(0.4);
-  doc.line(M, M + 21, PAGE_W - M, M + 21);
+  doc.line(M, y + 1, PAGE_W - M, y + 1);
+  return y + 5;
+}
+
+/** Adds a page when `needed` mm would run past the bottom margin; returns the y to draw at. */
+function ensureRoom(doc: jsPDF, y: number, needed: number): number {
+  if (y + needed > PAGE_H - M) {
+    doc.addPage();
+    return M + 6;
+  }
+  return y;
 }
 
 function legend(statusTypes: StatusType[]): string {
@@ -48,15 +65,11 @@ function finalY(doc: jsPDF): number {
 }
 
 function signatureBlock(doc: jsPDF, y: number, extra?: string) {
-  if (y > PAGE_H - 34) {
-    doc.addPage();
-    y = M + 6;
-  }
+  y = ensureRoom(doc, y, 30);
   doc.setFontSize(9.5);
   doc.setTextColor(20);
   if (extra) {
-    doc.text(extra, M, y);
-    y += 7;
+    y = block(doc, extra, y, 9.5) + 3;
   }
   const lineY = y + 8;
   doc.setLineWidth(0.3);
@@ -78,7 +91,7 @@ export function filledSheet(state: StateLike, checks: Check[]): jsPDF {
     const t = tally(check, state.statusTypes);
     const submitted = check.submittedAt ? `Submitted ${formatClock(check.submittedAt)}` : 'Not submitted';
     const source = check.source === 'paper' ? '  ·  Entered from paper' : '';
-    header(doc, [
+    const startY = header(doc, [
       `${state.settings.dormName} · ${check.scheduleName}`,
       `${check.floorName}  ·  ${formatDateLong(check.date)}  ·  ${formatTime12(check.time)}`,
       `RA: ${check.raName}  ·  ${submitted}${source}`,
@@ -86,20 +99,15 @@ export function filledSheet(state: StateLike, checks: Check[]): jsPDF {
     const body: RowInput[] = check.entries.map((e) => [e.roomNumber, e.name, String(e.grade), statusById(state, e.statusId)?.code ?? '?', e.note ?? '']);
     autoTable(doc, {
       ...tableBase(),
-      startY: M + 25,
+      startY,
       head: [['Room', 'Name', 'Gr', 'Status', 'Notes']],
       body,
       columnStyles: { 0: { cellWidth: 18 }, 2: { cellWidth: 11, halign: 'center' }, 3: { cellWidth: 17, halign: 'center', fontStyle: 'bold' }, 4: { cellWidth: 64 } },
     });
-    let y = finalY(doc) + 7;
-    doc.setFontSize(9.5);
-    doc.text(`Totals: ${t.byCode.filter((b) => b.count > 0).map((b) => `${b.count} ${b.name}`).join('  ·  ')}  ·  ${t.total} boys`, M, y);
-    y += 5;
-    doc.setFontSize(8.5);
-    doc.setTextColor(90);
-    doc.text(legend(statusTypes), M, y);
-    doc.setTextColor(0);
-    signatureBlock(doc, y + 4);
+    let y = ensureRoom(doc, finalY(doc) + 7, 42);
+    y = block(doc, `Totals: ${t.byCode.filter((b) => b.count > 0).map((b) => `${b.count} ${b.name}`).join('  ·  ')}  ·  ${t.total} boys`, y, 9.5) + 2;
+    y = block(doc, legend(statusTypes), y, 8.5, { grey: true });
+    signatureBlock(doc, y + 2);
   });
   return doc;
 }
@@ -112,7 +120,7 @@ export function blankSheet(state: StateLike, floorIds: string[], scheduleName = 
     const floor = state.floors.find((f) => f.id === floorId);
     if (!floor) return;
     if (i > 0) doc.addPage();
-    header(doc, [
+    const startY = header(doc, [
       `${state.settings.dormName} · ${scheduleName}`,
       `${floor.name}  ·  Date: ____________________  ·  Time: ____________`,
       'RA: ____________________________',
@@ -123,18 +131,14 @@ export function blankSheet(state: StateLike, floorIds: string[], scheduleName = 
     statusTypes.forEach((_, k) => { columnStyles[3 + k] = { cellWidth: 12, halign: 'center' }; });
     autoTable(doc, {
       ...tableBase(),
-      startY: M + 25,
+      startY,
       head: [['Room', 'Name', 'Gr', ...statusTypes.map((s) => s.code), 'Notes']],
       body,
       columnStyles,
     });
-    let y = finalY(doc) + 7;
-    doc.setFontSize(8.5);
-    doc.setTextColor(90);
-    doc.text(legend(statusTypes), M, y);
-    doc.setTextColor(0);
-    y += 4;
-    signatureBlock(doc, y, `${rows.length} boys on ${floor.name}. Tick one box per boy. Type it into the app later as "entered from paper".`);
+    let y = ensureRoom(doc, finalY(doc) + 7, 42);
+    y = block(doc, legend(statusTypes), y, 8.5, { grey: true });
+    signatureBlock(doc, y + 2, `${rows.length} boys on ${floor.name}. Tick one box per boy. Type it into the app later as "entered from paper".`);
   });
   return doc;
 }
@@ -148,7 +152,7 @@ export function weekSheet(state: StateLike, floorIds: string[], mondayKey: strin
     const floor = state.floors.find((f) => f.id === floorId);
     if (!floor) return;
     if (pageIndex > 0) doc.addPage();
-    header(doc, [
+    const startY = header(doc, [
       `${state.settings.dormName} · Week at a glance`,
       `${floor.name}  ·  ${formatDateShort(days[0])} to ${formatDateShort(days[6])}`,
       'One code per night. Two codes means two checks that day.',
@@ -169,16 +173,13 @@ export function weekSheet(state: StateLike, floorIds: string[], mondayKey: strin
     days.forEach((_, k) => { columnStyles[2 + k] = { cellWidth: 16, halign: 'center' }; });
     autoTable(doc, {
       ...tableBase(),
-      startY: M + 25,
+      startY,
       head: [['Room', 'Name', ...days.map((d) => { const dt = new Date(d + 'T00:00:00'); return `${DAY_NAMES[dt.getDay()]} ${dt.getDate()}`; })]],
       body,
       columnStyles,
     });
-    const y = finalY(doc) + 7;
-    doc.setFontSize(8.5);
-    doc.setTextColor(90);
-    doc.text(legend(statusTypes), M, y);
-    doc.setTextColor(0);
+    const y = ensureRoom(doc, finalY(doc) + 7, 12);
+    block(doc, legend(statusTypes), y, 8.5, { grey: true });
   });
   return doc;
 }

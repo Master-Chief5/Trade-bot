@@ -46,13 +46,13 @@ export function roleLabel(role: StaffUser['role']): string {
 }
 
 /** Floors this user may see and act on. */
-export function visibleFloorIds(state: AppState, user: StaffUser | null | undefined): string[] {
+export function visibleFloorIds(state: Pick<AppState, 'floors' | 'headRAPermissions'>, user: StaffUser | null | undefined): string[] {
   if (!user) return [];
   if (can(user, 'viewAllFloors', state.headRAPermissions)) return state.floors.map((f) => f.id);
   return user.floorIds.filter((id) => state.floors.some((f) => f.id === id));
 }
 
-export function printableFloorIds(state: AppState, user: StaffUser | null | undefined): string[] {
+export function printableFloorIds(state: Pick<AppState, 'floors' | 'headRAPermissions'>, user: StaffUser | null | undefined): string[] {
   if (!user) return [];
   if (can(user, 'printAllFloors', state.headRAPermissions) || can(user, 'viewAllFloors', state.headRAPermissions)) {
     return state.floors.map((f) => f.id);

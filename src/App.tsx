@@ -4,6 +4,7 @@ import { loadState, useAppState, useStoreReady } from './lib/store';
 import { signOut, useSessionUserId } from './lib/session';
 import { useCurrentUser } from './lib/useCurrentUser';
 import { can, type Capability } from './lib/permissions';
+import { useReminders, useRemindersEnabled } from './lib/reminders';
 import type { StaffUser } from './lib/types';
 import { TabBar, type TabDef } from './ui/Layout';
 import { Toaster } from './ui/Toaster';
@@ -74,6 +75,8 @@ const TABS: TabDef[] = [
 function Shell({ user }: { user: StaffUser }) {
   const state = useAppState();
   const location = useLocation();
+  const [remindersOn] = useRemindersEnabled();
+  useReminders(state, user, remindersOn);
   const wide = user.role === 'dean' || can(user, 'viewAllFloors', state.headRAPermissions);
   const isCheck = location.pathname.startsWith('/check/');
   return (
@@ -97,9 +100,9 @@ function Shell({ user }: { user: StaffUser }) {
           <Route path="settings/appearance" element={<Appearance />} />
           <Route path="settings/status-types" element={<Require user={user} cap="manageStatusTypes"><StatusTypes /></Require>} />
           <Route path="settings/schedules" element={<Require user={user} cap="manageSchedules"><Schedules /></Require>} />
-          <Route path="settings/staff" element={<Require user={user} cap="manageRAs"><Staff user={user} /></Require>} />
+          <Route path="settings/staff" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><Staff user={user} /></Require>} />
           <Route path="settings/staff/new" element={<Require user={user} cap="manageRAs"><StaffEdit user={user} /></Require>} />
-          <Route path="settings/staff/:id" element={<Require user={user} cap="manageRAs"><StaffEdit user={user} /></Require>} />
+          <Route path="settings/staff/:id" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><StaffEdit user={user} /></Require>} />
           <Route path="settings/head-ra" element={<Require user={user} cap="manageDeans"><HeadRA user={user} /></Require>} />
           <Route path="settings/leave" element={<Require user={user} cap="manageLeave"><LeaveBoard user={user} /></Require>} />
           <Route path="settings/rollover" element={<Require user={user} cap="rollover"><Rollover user={user} /></Require>} />
@@ -114,8 +117,10 @@ function Shell({ user }: { user: StaffUser }) {
   );
 }
 
-function Require({ user, cap, children }: { user: StaffUser; cap: Capability; children: ReactNode }) {
+/** Renders children only when the user has the capability (or any one of a list). */
+function Require({ user, cap, children }: { user: StaffUser; cap: Capability | Capability[]; children: ReactNode }) {
   const state = useAppState();
-  if (!can(user, cap, state.headRAPermissions)) return <Navigate to="/" replace />;
+  const caps = Array.isArray(cap) ? cap : [cap];
+  if (!caps.some((c) => can(user, c, state.headRAPermissions))) return <Navigate to="/" replace />;
   return <>{children}</>;
 }

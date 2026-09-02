@@ -4,7 +4,7 @@ import { sortedStatusTypes } from '../../lib/checks';
 import type { CountsAs, StatusType } from '../../lib/types';
 import { Button } from '../../ui/Button';
 import { SelectInput, TextInput, Toggle } from '../../ui/Form';
-import { Card, ListRow, PageHeader } from '../../ui/Layout';
+import { Card, PageHeader } from '../../ui/Layout';
 import { Sheet } from '../../ui/Sheet';
 import { toast } from '../../ui/toast';
 
@@ -17,19 +17,17 @@ export function StatusTypes() {
       <PageHeader back="/settings" backLabel="Settings" title="Status types" subtitle="What an RA can mark a boy as. The code is what prints on the sheet." actions={<Button iconOnly round icon="plus" aria-label="Add status type" onClick={() => setEditing('new')} />} />
       <Card>
         {list.map((s, i) => (
-          <ListRow
-            key={s.id}
-            lead={<span className="dot" style={{ background: s.color }} />}
-            title={<span className="row" style={{ gap: 8 }}>{s.name}<span className="mono small" style={{ padding: '1px 6px', borderRadius: 4, background: 'var(--surface-2)' }}>{s.code}</span></span>}
-            subtitle={[`Counts as ${s.countsAs}`, s.requiresNote ? 'note required' : '', s.isDefault ? 'default' : '', s.useForLeave ? 'used for leave' : ''].filter(Boolean).join(' · ')}
-            onClick={() => setEditing(s)}
-            trail={
-              <span className="row" style={{ gap: 2 }} onClick={(e) => e.stopPropagation()}>
-                <Button variant="ghost" size="sm" iconOnly icon="up" aria-label={`Move ${s.name} up`} disabled={i === 0} onClick={() => actions.moveStatusType(s.id, -1)} />
-                <Button variant="ghost" size="sm" iconOnly icon="down" aria-label={`Move ${s.name} down`} disabled={i === list.length - 1} onClick={() => actions.moveStatusType(s.id, 1)} />
-              </span>
-            }
-          />
+          <div key={s.id} className="listrow">
+            <span className="lead"><span className="dot" style={{ background: s.color }} /></span>
+            <button type="button" className="body" style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', minHeight: 44, cursor: 'pointer' }} onClick={() => setEditing(s)} aria-label={`Edit ${s.name}`}>
+              <span className="primary-text row" style={{ gap: 8 }}>{s.name}<span className="mono small" style={{ padding: '1px 6px', borderRadius: 4, background: 'var(--surface-2)' }}>{s.code}</span></span>
+              <span className="secondary-text">{[`Counts as ${s.countsAs}`, s.requiresNote ? 'note required' : '', s.isDefault ? 'default' : '', s.useForLeave ? 'used for leave' : ''].filter(Boolean).join(' · ')}</span>
+            </button>
+            <span className="trail" style={{ gap: 2 }}>
+              <Button variant="ghost" size="sm" iconOnly icon="up" aria-label={`Move ${s.name} up`} disabled={i === 0} onClick={() => actions.moveStatusType(s.id, -1)} />
+              <Button variant="ghost" size="sm" iconOnly icon="down" aria-label={`Move ${s.name} down`} disabled={i === list.length - 1} onClick={() => actions.moveStatusType(s.id, 1)} />
+            </span>
+          </div>
         ))}
       </Card>
       <p className="muted small">The order here is the order a tap cycles through on the check screen. The default is what every boy starts as. The leave status is what a signed-out boy is pre-marked as.</p>
