@@ -1,0 +1,44 @@
+{
+  "name": "ryan-hall-room-check",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Room check web app for Ryan Hall, Kingsway College. RAs record who is present, deans keep the roster, and the app prints the school's paper check sheet.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run lint && npm run test"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "idb-keyval": "^6.2.1",
+    "immer": "^10.1.1",
+    "jspdf": "^3.0.1",
+    "jspdf-autotable": "^5.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.56.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "jsdom": "^26.0.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "^1.0.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,586 @@
+import { produce, type Draft } from 'immer';
+import { get, set } from 'idb-keyval';
+import { useSyncExternalStore } from 'react';
+import type {
+  AppState, Boy, CheckSchedule, Floor, HeadRAPermissions, Leave, Room, RoomType, StaffUser, StatusType,
+} from './types';
+import { DEFAULT_HEAD_RA_PERMISSIONS, DEFAULT_SCHEDULES, DEFAULT_STATUS_TYPES, initialState } from './defaults';
+import { uid } from './ids';
+import { nowIso, hoursSince } from './dates';
+import { boysOnFloor, defaultStatusFor, findCheck, naturalCompare } from './checks';
+import { can } from './permissions';
+
+const STORAGE_KEY = 'rh-state-v1';
+
+let state: AppState = initialState();
+let ready = false;
+const listeners = new Set<() => void>();
+let persistEnabled = true;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function getState(): AppState {
+  return state;
+}
+export function isReady(): boolean {
+  return ready;
+}
+export function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function emit() {
+  listeners.forEach((l) => l());
+}
+
+export function setPersistence(enabled: boolean) {
+  persistEnabled = enabled;
+}
+
+function scheduleSave() {
+  if (!persistEnabled) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void persistNow();
+  }, 150);
+}
+
+export async function persistNow(): Promise<void> {
+  if (!persistEnabled) return;
+  try {
+    await set(STORAGE_KEY, state);
+  } catch (err) {
+    console.warn('Could not save to this device', err);
+  }
+}
+
+export async function loadState(): Promise<void> {
+  try {
+    // Ask the browser not to evict our data when storage runs low (best effort).
+    void navigator.storage?.persist?.().catch(() => undefined);
+  } catch {
+    // older browsers
+  }
+  try {
+    const saved = (await get(STORAGE_KEY)) as AppState | undefined;
+    if (saved && saved.version === 1) state = migrate(saved);
+  } catch (err) {
+    console.warn('Could not read saved data', err);
+  }
+  ready = true;
+  emit();
+}
+
+function migrate(s: AppState): AppState {
+  const base = initialState();
+  return {
+    ...base,
+    ...s,
+    settings: { ...base.settings, ...s.settings },
+    headRAPermissions: { ...DEFAULT_HEAD_RA_PERMISSIONS, ...s.headRAPermissions },
+    floors: (s.floors ?? []).map((f) => ({ ...f, layout: f.layout ?? 'corridor' })),
+  };
+}
+
+/** Replace state wholesale (tests, import). */
+export function replaceState(next: AppState) {
+  state = next;
+  ready = true;
+  emit();
+  scheduleSave();
+}
+
+export function update(recipe: (draft: Draft<AppState>) => void) {
+  state = produce(state, recipe);
+  emit();
+  scheduleSave();
+}
+
+export function useAppState(): AppState {
+  return useSyncExternalStore(subscribe, getState, getState);
+}
+export function useStoreReady(): boolean {
+  return useSyncExternalStore(subscribe, isReady, isReady);
+}
+
+// ---------- helpers ----------
+
+function log(d: Draft<AppState>, actor: StaffUser | null | undefined, action: string, detail: string) {
+  d.audit.unshift({ id: uid('a'), at: nowIso(), userId: actor?.id ?? 'system', userName: actor?.name ?? 'System', action, detail });
+  if (d.audit.length > 1000) d.audit.length = 1000;
+}
+
+function withIds<T extends object>(items: Omit<T, 'id'>[], prefix: string): T[] {
+  return items.map((it) => ({ ...(it as T), id: uid(prefix) }));
+}
+
+export function boyName(b: Pick<Boy, 'firstName' | 'lastName' | 'preferredName'>): string {
+  const first = b.preferredName?.trim() || b.firstName;
+  return `${first} ${b.lastName}`.trim();
+}
+
+export interface SetupFloorInput {
+  name: string;
+  gradeLabel?: string;
+  roomFrom: number;
+  roomTo: number;
+  capacity: number;
+}
+export interface SetupInput {
+  dormName: string;
+  yearLabel: string;
+  dean: { name: string; pin: string; email?: string };
+  floors: SetupFloorInput[];
+}
+
+export interface RosterRow {
+  firstName: string;
+  lastName: string;
+  grade: number;
+  roomNumber: string;
+}
+
+export type Result = { ok: true } | { ok: false; error: string };
+
+// ---------- actions ----------
+
+export const actions = {
+  completeSetup(input: SetupInput): string {
+    const deanId = uid('u');
+    update((d) => {
+      d.settings.dormName = input.dormName.trim() || 'Ryan Hall';
+      d.settings.yearLabel = input.yearLabel.trim() || d.settings.yearLabel;
+      const dean: StaffUser = {
+        id: deanId, name: input.dean.name.trim(), email: input.dean.email?.trim() || undefined,
+        role: 'dean', pin: input.dean.pin, active: true, floorIds: [], createdAt: nowIso(),
+      };
+      d.staff.push(dean);
+      if (d.statusTypes.length === 0) d.statusTypes = withIds<StatusType>(DEFAULT_STATUS_TYPES, 's');
+      if (d.schedules.length === 0) d.schedules = withIds<CheckSchedule>(DEFAULT_SCHEDULES, 'sch');
+      input.floors.forEach((f, i) => {
+        const floor: Floor = { id: uid('f'), name: f.name.trim() || `Floor ${i + 1}`, sortOrder: i, gradeLabel: f.gradeLabel?.trim() || undefined, layout: 'corridor' };
+        d.floors.push(floor);
+        addRoomsRangeDraft(d, floor.id, f.roomFrom, f.roomTo, f.capacity);
+      });
+      d.setupComplete = true;
+      log(d, dean, 'setup', `Set up ${d.settings.dormName} with ${input.floors.length} floors`);
+    });
+    return deanId;
+  },
+
+  // ----- floors & rooms -----
+  addFloor(name: string, gradeLabel?: string): string {
+    const id = uid('f');
+    update((d) => {
+      d.floors.push({ id, name: name.trim(), sortOrder: d.floors.length, gradeLabel: gradeLabel?.trim() || undefined, layout: 'corridor' });
+    });
+    return id;
+  },
+  updateFloor(id: string, patch: Partial<Omit<Floor, 'id'>>) {
+    update((d) => {
+      const f = d.floors.find((x) => x.id === id);
+      if (f) Object.assign(f, patch);
+    });
+  },
+  moveFloor(id: string, dir: -1 | 1) {
+    update((d) => {
+      const sorted = [...d.floors].sort((a, b) => a.sortOrder - b.sortOrder);
+      const i = sorted.findIndex((f) => f.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= sorted.length) return;
+      [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+      sorted.forEach((f, k) => {
+        const real = d.floors.find((x) => x.id === f.id);
+        if (real) real.sortOrder = k;
+      });
+    });
+  },
+  deleteFloor(id: string): Result {
+    const roomIds = state.rooms.filter((r) => r.floorId === id).map((r) => r.id);
+    if (state.boys.some((b) => b.active && b.roomId && roomIds.includes(b.roomId))) {
+      return { ok: false, error: 'Move the boys off this floor first.' };
+    }
+    update((d) => {
+      d.floors = d.floors.filter((f) => f.id !== id);
+      d.rooms = d.rooms.filter((r) => r.floorId !== id);
+      d.staff.forEach((s) => { s.floorIds = s.floorIds.filter((x) => x !== id); });
+      d.schedules.forEach((s) => { if (s.floorIds !== 'all') s.floorIds = s.floorIds.filter((x) => x !== id); });
+    });
+    return { ok: true };
+  },
+  addRoomsRange(floorId: string, from: number, to: number, capacity = 2): number {
+    let added = 0;
+    update((d) => { added = addRoomsRangeDraft(d, floorId, from, to, capacity); });
+    return added;
+  },
+  addRoom(floorId: string, number: string, capacity = 2, type: RoomType = 'standard'): Result {
+    const num = number.trim();
+    if (!num) return { ok: false, error: 'Room number is required.' };
+    if (state.rooms.some((r) => r.floorId === floorId && r.number.toLowerCase() === num.toLowerCase())) {
+      return { ok: false, error: `Room ${num} already exists on this floor.` };
+    }
+    update((d) => {
+      d.rooms.push({ id: uid('r'), floorId, number: num, capacity, type, sortOrder: d.rooms.filter((r) => r.floorId === floorId).length });
+    });
+    return { ok: true };
+  },
+  updateRoom(id: string, patch: Partial<Omit<Room, 'id' | 'floorId'>>) {
+    update((d) => {
+      const r = d.rooms.find((x) => x.id === id);
+      if (r) Object.assign(r, patch);
+    });
+  },
+  deleteRoom(id: string): Result {
+    if (state.boys.some((b) => b.active && b.roomId === id)) return { ok: false, error: 'Move the boys out of this room first.' };
+    update((d) => {
+      d.rooms = d.rooms.filter((r) => r.id !== id);
+      d.boys.forEach((b) => { if (b.roomId === id) b.roomId = null; });
+    });
+    return { ok: true };
+  },
+
+  // ----- boys -----
+  addBoy(input: { firstName: string; lastName: string; preferredName?: string; grade: number; roomId: string | null; deanNotes?: string }, actor?: StaffUser): string {
+    const id = uid('b');
+    update((d) => {
+      const boy: Boy = {
+        id, firstName: input.firstName.trim(), lastName: input.lastName.trim(), preferredName: input.preferredName?.trim() || undefined,
+        grade: input.grade, roomId: input.roomId, active: true, deanNotes: input.deanNotes?.trim() || undefined, createdAt: nowIso(),
+      };
+      d.boys.push(boy);
+      if (input.roomId) {
+        const room = d.rooms.find((r) => r.id === input.roomId);
+        d.moves.push({ id: uid('m'), boyId: id, fromRoom: null, toRoom: room?.number ?? null, at: nowIso(), by: actor?.id ?? 'system' });
+      }
+      log(d, actor, 'boy.add', boyName(boy));
+    });
+    return id;
+  },
+  updateBoy(id: string, patch: Partial<Omit<Boy, 'id' | 'roomId' | 'createdAt'>>, actor?: StaffUser) {
+    update((d) => {
+      const b = d.boys.find((x) => x.id === id);
+      if (!b) return;
+      Object.assign(b, patch);
+      log(d, actor, 'boy.update', boyName(b));
+    });
+  },
+  moveBoy(boyId: string, roomId: string | null, actor?: StaffUser) {
+    update((d) => {
+      const b = d.boys.find((x) => x.id === boyId);
+      if (!b || b.roomId === roomId) return;
+      const from = d.rooms.find((r) => r.id === b.roomId)?.number ?? null;
+      const to = d.rooms.find((r) => r.id === roomId)?.number ?? null;
+      b.roomId = roomId;
+      d.moves.push({ id: uid('m'), boyId, fromRoom: from, toRoom: to, at: nowIso(), by: actor?.id ?? 'system' });
+      log(d, actor, 'boy.move', `${boyName(b)}: ${from ?? 'no room'} → ${to ?? 'no room'}`);
+    });
+  },
+  setBoyActive(id: string, active: boolean, actor?: StaffUser) {
+    update((d) => {
+      const b = d.boys.find((x) => x.id === id);
+      if (!b) return;
+      b.active = active;
+      log(d, actor, active ? 'boy.reactivate' : 'boy.remove', boyName(b));
+    });
+  },
+  deleteBoy(id: string, actor?: StaffUser): Result {
+    if (state.checks.some((c) => c.entries.some((e) => e.boyId === id))) {
+      return { ok: false, error: 'This boy appears on past checks. Remove him from the roster instead so history stays intact.' };
+    }
+    update((d) => {
+      const b = d.boys.find((x) => x.id === id);
+      d.boys = d.boys.filter((x) => x.id !== id);
+      d.leaves = d.leaves.filter((l) => l.boyId !== id);
+      if (b) log(d, actor, 'boy.delete', boyName(b));
+    });
+    return { ok: true };
+  },
+  importRoster(rows: RosterRow[], actor?: StaffUser): { added: number; updated: number; unmatchedRooms: string[] } {
+    let added = 0;
+    let updated = 0;
+    const unmatched = new Set<string>();
+    update((d) => {
+      for (const row of rows) {
+        const room = row.roomNumber ? d.rooms.find((r) => r.number.toLowerCase() === row.roomNumber.toLowerCase()) : undefined;
+        if (row.roomNumber && !room) unmatched.add(row.roomNumber);
+        const existing = d.boys.find((b) => b.firstName.toLowerCase() === row.firstName.toLowerCase() && b.lastName.toLowerCase() === row.lastName.toLowerCase());
+        if (existing) {
+          existing.grade = row.grade;
+          existing.active = true;
+          if (room && existing.roomId !== room.id) {
+            const from = d.rooms.find((r) => r.id === existing.roomId)?.number ?? null;
+            existing.roomId = room.id;
+            d.moves.push({ id: uid('m'), boyId: existing.id, fromRoom: from, toRoom: room.number, at: nowIso(), by: actor?.id ?? 'system' });
+          }
+          updated++;
+        } else {
+          const boy: Boy = { id: uid('b'), firstName: row.firstName, lastName: row.lastName, grade: row.grade, roomId: room?.id ?? null, active: true, createdAt: nowIso() };
+          d.boys.push(boy);
+          if (room) d.moves.push({ id: uid('m'), boyId: boy.id, fromRoom: null, toRoom: room.number, at: nowIso(), by: actor?.id ?? 'system' });
+          added++;
+        }
+      }
+      log(d, actor, 'roster.import', `${added} added, ${updated} updated`);
+    });
+    return { added, updated, unmatchedRooms: [...unmatched] };
+  },
+
+  // ----- staff -----
+  addStaff(input: { name: string; email?: string; role: StaffUser['role']; pin: string; floorIds: string[] }, actor?: StaffUser): string {
+    const id = uid('u');
+    update((d) => {
+      d.staff.push({ id, name: input.name.trim(), email: input.email?.trim() || undefined, role: input.role, pin: input.pin, active: true, floorIds: [...input.floorIds], createdAt: nowIso() });
+      log(d, actor, 'staff.add', `${input.name.trim()} (${input.role})`);
+    });
+    return id;
+  },
+  updateStaff(id: string, patch: Partial<Omit<StaffUser, 'id' | 'createdAt'>>, actor?: StaffUser) {
+    update((d) => {
+      const s = d.staff.find((x) => x.id === id);
+      if (!s) return;
+      Object.assign(s, patch);
+      log(d, actor, 'staff.update', s.name);
+    });
+  },
+  setHeadRAPermissions(perms: HeadRAPermissions, actor?: StaffUser) {
+    update((d) => {
+      d.headRAPermissions = { ...perms };
+      log(d, actor, 'headra.permissions', Object.entries(perms).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none');
+    });
+  },
+
+  // ----- status types -----
+  addStatusType(input: Omit<StatusType, 'id' | 'sortOrder'>): Result {
+    const code = input.code.trim().toUpperCase();
+    if (!input.name.trim() || !code) return { ok: false, error: 'Name and code are required.' };
+    if (state.statusTypes.some((s) => s.code.toUpperCase() === code)) return { ok: false, error: `Code ${code} is already used.` };
+    update((d) => {
+      const st: StatusType = { ...input, name: input.name.trim(), code, id: uid('s'), sortOrder: d.statusTypes.length };
+      if (st.isDefault) d.statusTypes.forEach((s) => { s.isDefault = false; });
+      if (st.useForLeave) d.statusTypes.forEach((s) => { s.useForLeave = false; });
+      d.statusTypes.push(st);
+    });
+    return { ok: true };
+  },
+  updateStatusType(id: string, patch: Partial<Omit<StatusType, 'id'>>): Result {
+    if (patch.code !== undefined) {
+      const code = patch.code.trim().toUpperCase();
+      if (!code) return { ok: false, error: 'Code is required.' };
+      if (state.statusTypes.some((s) => s.id !== id && s.code.toUpperCase() === code)) return { ok: false, error: `Code ${code} is already used.` };
+      patch = { ...patch, code };
+    }
+    update((d) => {
+      const st = d.statusTypes.find((s) => s.id === id);
+      if (!st) return;
+      if (patch.isDefault) d.statusTypes.forEach((s) => { s.isDefault = false; });
+      if (patch.useForLeave) d.statusTypes.forEach((s) => { s.useForLeave = false; });
+      Object.assign(st, patch);
+    });
+    return { ok: true };
+  },
+  moveStatusType(id: string, dir: -1 | 1) {
+    update((d) => {
+      const sorted = [...d.statusTypes].sort((a, b) => a.sortOrder - b.sortOrder);
+      const i = sorted.findIndex((s) => s.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= sorted.length) return;
+      [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+      sorted.forEach((s, k) => {
+        const real = d.statusTypes.find((x) => x.id === s.id);
+        if (real) real.sortOrder = k;
+      });
+    });
+  },
+  deleteStatusType(id: string): Result {
+    if (state.statusTypes.length <= 1) return { ok: false, error: 'Keep at least one status type.' };
+    if (state.checks.some((c) => c.entries.some((e) => e.statusId === id))) return { ok: false, error: 'This status is used on past checks. Rename it instead.' };
+    const st = state.statusTypes.find((s) => s.id === id);
+    if (st?.isDefault) return { ok: false, error: 'Make another status the default first.' };
+    update((d) => { d.statusTypes = d.statusTypes.filter((s) => s.id !== id); });
+    return { ok: true };
+  },
+
+  // ----- schedules -----
+  addSchedule(input: Omit<CheckSchedule, 'id'>): string {
+    const id = uid('sch');
+    update((d) => { d.schedules.push({ ...input, id }); });
+    return id;
+  },
+  updateSchedule(id: string, patch: Partial<Omit<CheckSchedule, 'id'>>) {
+    update((d) => {
+      const s = d.schedules.find((x) => x.id === id);
+      if (s) Object.assign(s, patch);
+    });
+  },
+  deleteSchedule(id: string) {
+    update((d) => { d.schedules = d.schedules.filter((s) => s.id !== id); });
+  },
+
+  // ----- checks -----
+  /** Creates the check if it does not exist yet. Returns the check id. */
+  startCheck(scheduleId: string, floorId: string, date: string, actor: StaffUser, source: 'app' | 'paper' = 'app'): string {
+    const existing = findCheck(state, scheduleId, floorId, date);
+    if (existing) return existing.id;
+    const id = uid('c');
+    update((d) => {
+      const schedule = d.schedules.find((s) => s.id === scheduleId);
+      const floor = d.floors.find((f) => f.id === floorId);
+      if (!schedule || !floor) return;
+      const entries = boysOnFloor(d, floorId).map(({ boy, room }) => ({
+        boyId: boy.id, name: boyName(boy), grade: boy.grade, roomNumber: room?.number ?? '', statusId: defaultStatusFor(d, boy.id, date).id,
+      }));
+      d.checks.push({
+        id, scheduleId, scheduleName: schedule.name, time: schedule.time, floorId, floorName: floor.name, date,
+        raId: actor.id, raName: actor.name, startedAt: nowIso(), submittedAt: null, source, entries,
+      });
+      log(d, actor, source === 'paper' ? 'check.paper' : 'check.start', `${schedule.name} · ${floor.name} · ${date}`);
+    });
+    return id;
+  },
+  setEntryStatus(checkId: string, boyId: string, statusId: string) {
+    update((d) => {
+      const c = d.checks.find((x) => x.id === checkId);
+      const e = c?.entries.find((x) => x.boyId === boyId);
+      if (e) e.statusId = statusId;
+    });
+  },
+  cycleEntryStatus(checkId: string, boyId: string) {
+    update((d) => {
+      const c = d.checks.find((x) => x.id === checkId);
+      const e = c?.entries.find((x) => x.boyId === boyId);
+      if (!e) return;
+      const sorted = [...d.statusTypes].sort((a, b) => a.sortOrder - b.sortOrder);
+      const i = sorted.findIndex((s) => s.id === e.statusId);
+      e.statusId = sorted[(i + 1) % sorted.length].id;
+    });
+  },
+  setEntryNote(checkId: string, boyId: string, note: string) {
+    update((d) => {
+      const c = d.checks.find((x) => x.id === checkId);
+      const e = c?.entries.find((x) => x.boyId === boyId);
+      if (e) e.note = note.trim() || undefined;
+    });
+  },
+  markAllDefault(checkId: string, date: string) {
+    update((d) => {
+      const c = d.checks.find((x) => x.id === checkId);
+      if (!c) return;
+      c.entries.forEach((e) => { e.statusId = defaultStatusFor(d, e.boyId, date).id; });
+    });
+  },
+  submitCheck(checkId: string, actor: StaffUser): { ok: true } | { ok: false; error: string; missingNotes: string[] } {
+    const c = state.checks.find((x) => x.id === checkId);
+    if (!c) return { ok: false, error: 'Check not found.', missingNotes: [] };
+    const missing = c.entries
+      .filter((e) => state.statusTypes.find((s) => s.id === e.statusId)?.requiresNote && !e.note)
+      .map((e) => e.name);
+    if (missing.length) return { ok: false, error: 'Some statuses need a note.', missingNotes: missing };
+    update((d) => {
+      const check = d.checks.find((x) => x.id === checkId);
+      if (!check) return;
+      check.submittedAt = nowIso();
+      log(d, actor, 'check.submit', `${check.scheduleName} · ${check.floorName} · ${check.date}`);
+    });
+    return { ok: true };
+  },
+  reopenCheck(checkId: string, actor: StaffUser): Result {
+    const c = state.checks.find((x) => x.id === checkId);
+    if (!c || !c.submittedAt) return { ok: false, error: 'Nothing to reopen.' };
+    const isDean = actor.role === 'dean';
+    const headRAOk = can(actor, 'reopenCheck', state.headRAPermissions) && hoursSince(c.submittedAt) <= 24;
+    if (!isDean && !headRAOk) return { ok: false, error: 'Only a dean can reopen this check.' };
+    update((d) => {
+      const check = d.checks.find((x) => x.id === checkId);
+      if (!check) return;
+      check.submittedAt = null;
+      check.reopenedBy = actor.id;
+      log(d, actor, 'check.reopen', `${check.scheduleName} · ${check.floorName} · ${check.date}`);
+    });
+    return { ok: true };
+  },
+  deleteCheck(checkId: string, actor: StaffUser): Result {
+    const c = state.checks.find((x) => x.id === checkId);
+    if (!c) return { ok: false, error: 'Check not found.' };
+    if (c.submittedAt && actor.role !== 'dean') return { ok: false, error: 'Only a dean can delete a submitted check.' };
+    update((d) => {
+      d.checks = d.checks.filter((x) => x.id !== checkId);
+      log(d, actor, 'check.delete', `${c.scheduleName} · ${c.floorName} · ${c.date}`);
+    });
+    return { ok: true };
+  },
+
+  // ----- leave -----
+  addLeave(input: Omit<Leave, 'id' | 'enteredBy'>, actor: StaffUser): Result {
+    if (input.to < input.from) return { ok: false, error: 'The end date is before the start date.' };
+    update((d) => {
+      d.leaves.push({ ...input, reason: input.reason.trim(), id: uid('l'), enteredBy: actor.id });
+      const b = d.boys.find((x) => x.id === input.boyId);
+      log(d, actor, 'leave.add', `${b ? boyName(b) : input.boyId}: ${input.from} to ${input.to}`);
+    });
+    return { ok: true };
+  },
+  deleteLeave(id: string, actor: StaffUser) {
+    update((d) => {
+      d.leaves = d.leaves.filter((l) => l.id !== id);
+      log(d, actor, 'leave.delete', id);
+    });
+  },
+
+  // ----- settings / rollover / backup -----
+  updateSettings(patch: Partial<AppState['settings']>) {
+    update((d) => { Object.assign(d.settings, patch); });
+  },
+  archiveYear(newYearLabel: string, actor: StaffUser) {
+    update((d) => {
+      d.archives.unshift({
+        id: uid('y'), label: d.settings.yearLabel, archivedAt: nowIso(),
+        floors: [...d.floors], rooms: [...d.rooms], boys: [...d.boys], checks: [...d.checks], leaves: [...d.leaves],
+      });
+      d.boys = [];
+      d.checks = [];
+      d.leaves = [];
+      d.moves = [];
+      d.staff.forEach((s) => { if (s.role !== 'dean') s.active = false; });
+      d.settings.yearLabel = newYearLabel.trim() || d.settings.yearLabel;
+      log(d, actor, 'year.rollover', `Archived ${d.archives[0].label}, started ${d.settings.yearLabel}`);
+    });
+  },
+  exportJson(): string {
+    return JSON.stringify({ exportedAt: nowIso(), state }, null, 2);
+  },
+  importJson(json: string): Result {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      return { ok: false, error: 'That file is not valid JSON.' };
+    }
+    const candidate = (parsed && typeof parsed === 'object' && 'state' in parsed ? (parsed as { state: unknown }).state : parsed) as Partial<AppState> | null;
+    if (!candidate || typeof candidate !== 'object' || candidate.version !== 1 || !Array.isArray(candidate.floors) || !Array.isArray(candidate.staff)) {
+      return { ok: false, error: 'That file is not a Room Check backup.' };
+    }
+    replaceState(migrate(candidate as AppState));
+    return { ok: true };
+  },
+  resetAll() {
+    replaceState(initialState());
+  },
+};
+
+function addRoomsRangeDraft(d: Draft<AppState>, floorId: string, from: number, to: number, capacity: number): number {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 500) return 0;
+  const existing = new Set(d.rooms.filter((r) => r.floorId === floorId).map((r) => r.number.toLowerCase()));
+  const width = String(from).length;
+  let order = d.rooms.filter((r) => r.floorId === floorId).length;
+  let added = 0;
+  for (let n = from; n <= to; n++) {
+    const num = String(n).padStart(width, '0');
+    if (existing.has(num.toLowerCase())) continue;
+    d.rooms.push({ id: uid('r'), floorId, number: num, capacity, type: 'standard', sortOrder: order++ });
+    added++;
+  }
+  d.rooms.sort((a, b) => (a.floorId === b.floorId ? naturalCompare(a.number, b.number) : 0));
+  return added;
+}
