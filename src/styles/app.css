@@ -294,7 +294,7 @@ button.pill { cursor: pointer; }
 
 /* ---------- floor map ---------- */
 .floor-map { display: grid; grid-template-columns: 1fr 34px 1fr; gap: 8px; }
-.floor-map.single { grid-template-columns: 1fr; }
+.floor-map.layout-single { grid-template-columns: 1fr; }
 .floor-col { display: flex; flex-direction: column; gap: 8px; }
 .corridor { border-left: 1px dashed var(--faint); border-right: 1px dashed var(--faint); display: flex; align-items: center; justify-content: center; }
 .corridor span { writing-mode: vertical-rl; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
@@ -312,10 +312,10 @@ button.pill { cursor: pointer; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
 @media (min-width: 900px) {
-  .floor-map.corridor.wide { grid-template-columns: 1fr; }
-  .floor-map.corridor.wide .floor-col { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .floor-map.corridor.wide .corridor { height: 30px; border: none; border-top: 1px dashed var(--faint); border-bottom: 1px dashed var(--faint); }
-  .floor-map.corridor.wide .corridor span { writing-mode: horizontal-tb; }
+  .floor-map.layout-corridor.wide { grid-template-columns: 1fr; }
+  .floor-map.layout-corridor.wide .floor-col { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .floor-map.layout-corridor.wide .corridor { height: 30px; border: none; border-top: 1px dashed var(--faint); border-bottom: 1px dashed var(--faint); }
+  .floor-map.layout-corridor.wide .corridor span { writing-mode: horizontal-tb; }
 }
 
 /* ---------- dean dashboard grid ---------- */

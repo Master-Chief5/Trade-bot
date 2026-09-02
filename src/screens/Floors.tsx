@@ -78,7 +78,7 @@ export function Floors({ user }: { user: StaffUser }) {
                 {rooms.length === 0 ? (
                   <Empty>No rooms on this floor yet.</Empty>
                 ) : (
-                  <div className={`floor-map ${floor.layout} wide`}>
+                  <div className={`floor-map layout-${floor.layout} wide`}>
                     <div className="floor-col">
                       {(floor.layout === 'single' ? rooms : left).map((r) => (
                         <Tile key={r.id} room={r} state={states.get(r.id) ?? 'empty'} names={roomOccupants(state, r.id).map((b) => shortName(b.firstName, b.lastName, b.preferredName))} onClick={() => setRoomSheet(r)} />
