@@ -39,6 +39,11 @@ export function weekStart(key: string): string {
   return addDays(key, -back);
 }
 
+/** Sunday of the week containing `key`. The check sheet's week runs Sunday first. */
+export function weekStartSunday(key: string): string {
+  return addDays(key, -weekdayOf(key));
+}
+
 export function formatDate(key: string): string {
   const d = parseKey(key);
   return `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;

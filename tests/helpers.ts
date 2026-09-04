@@ -38,6 +38,17 @@ export function addRA(name: string, floorNames: string[], dean: StaffUser, role:
   return getState().staff.find((s) => s.id === id)!;
 }
 
+/**
+ * Collapse the three default checks down to one that runs every day.
+ * Slot-timing tests are about the clock, not the calendar, and the real schedules
+ * only run Sunday to Thursday — without this they fail whenever CI runs on a Friday.
+ */
+export function singleSchedule(time = '22:00', deadlineMinutes = 20) {
+  getState().schedules.slice(1).forEach((s) => actions.deleteSchedule(s.id));
+  actions.updateSchedule(getState().schedules[0].id, { time, days: [0, 1, 2, 3, 4, 5, 6], deadlineMinutes });
+  return getState().schedules[0];
+}
+
 export function status(code: string) {
   return getState().statusTypes.find((s) => s.code === code)!;
 }

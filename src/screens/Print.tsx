@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useAppState } from '../lib/store';
 import { sortedFloors } from '../lib/checks';
-import { formatDate, formatDateShort, todayKey, weekStart } from '../lib/dates';
+import { formatDate, formatDateShort, todayKey, weekStart, weekStartSunday } from '../lib/dates';
 import { printableFloorIds } from '../lib/permissions';
-import { blankSheet, downloadPdf, filledSheet, openPdf, safeName, weekSheet } from '../lib/pdf';
+import { blankSheet, downloadPdf, filledSheet, openPdf, raSheet, safeName, weekSheet } from '../lib/pdf';
 import type { StaffUser } from '../lib/types';
 import type { jsPDF } from 'jspdf';
 import { Button } from '../ui/Button';
@@ -30,6 +30,10 @@ export function Print({ user }: { user: StaffUser }) {
     .map((c) => (canSeeNotesOf(c) ? c : { ...c, entries: c.entries.map((e) => ({ ...e, note: undefined })) }));
   const inProgress = checks.length - submitted.length;
   const monday = weekStart(date);
+  const sunday = weekStartSunday(date);
+  const sheetFloor = floorSel === 'all' ? floors[0]?.id : floorSel;
+  const sheetFloorName = floors.find((f) => f.id === sheetFloor)?.name ?? '';
+  const raOfFloor = state.staff.find((s) => s.active && s.role === 'ra' && sheetFloor !== undefined && s.floorIds.includes(sheetFloor));
   const dorm = safeName(state.settings.dormName);
 
   const make = (build: () => jsPDF, name: string, how: 'open' | 'download') => {
@@ -44,6 +48,24 @@ export function Print({ user }: { user: StaffUser }) {
   };
 
   const docs = [
+    {
+      key: 'sheet',
+      title: `Check sheet · week of ${formatDateShort(sunday)}`,
+      desc: sheetFloor
+        ? `${sheetFloorName}: rooms down the side, one column per check per day, filled in from the week's submitted checks. This is the sheet that gets signed.`
+        : 'Add a floor first.',
+      disabled: !sheetFloor,
+      build: () => raSheet(state, sheetFloor as string, sunday, { raName: raOfFloor?.name }),
+      name: `${dorm}-sheet-${sunday}.pdf`,
+    },
+    {
+      key: 'sheet-blank',
+      title: 'Check sheet · blank',
+      desc: 'The same sheet with the roster printed and every mark left empty. For when a phone is not an option.',
+      disabled: !sheetFloor,
+      build: () => raSheet(state, sheetFloor as string, sunday, { blank: true }),
+      name: `${dorm}-sheet-blank.pdf`,
+    },
     {
       key: 'filled',
       title: `Check sheet · ${formatDate(date)}`,

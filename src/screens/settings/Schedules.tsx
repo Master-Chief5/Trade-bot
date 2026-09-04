@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { actions, useAppState } from '../../lib/store';
-import { sortedFloors } from '../../lib/checks';
+import { scheduleCode, sortedFloors } from '../../lib/checks';
 import { DAY_NAMES, formatTime12, isValidTime } from '../../lib/dates';
 import type { CheckSchedule } from '../../lib/types';
 import { Button } from '../../ui/Button';
@@ -28,10 +28,10 @@ export function Schedules() {
       <Card>
         {state.schedules.length === 0 && <Empty>No schedules. Add one so checks appear on the home screen.</Empty>}
         {state.schedules.map((s) => (
-          <ListRow key={s.id} onClick={() => setEditing(s)} title={s.name} subtitle={`${formatTime12(s.time)} · ${daysLabel(s.days)} · ${floorsLabel(s)} · reminder ${s.reminderMinutes} min · deadline +${s.deadlineMinutes} min`} trail={<span className={`tag ${s.active ? 'present' : 'neutral'}`}>{s.active ? 'On' : 'Off'}</span>} chevron />
+          <ListRow key={s.id} onClick={() => setEditing(s)} title={s.name} subtitle={`${scheduleCode(s)} · ${formatTime12(s.time)} · ${daysLabel(s.days)} · ${floorsLabel(s)} · reminder ${s.reminderMinutes} min · deadline +${s.deadlineMinutes} min`} trail={<span className={`tag ${s.active ? 'present' : 'neutral'}`}>{s.active ? 'On' : 'Off'}</span>} chevron />
         ))}
       </Card>
-      <p className="muted small">Times can differ by day. For a Sabbath morning check, add a second schedule that only runs on Saturday.</p>
+      <p className="muted small">Each check becomes a column on the printed sheet, and each day it runs becomes a column block. The school's sheet runs Sunday to Thursday — add Friday or Saturday here and the sheet grows to match.</p>
       <Sheet open={editing !== null} title={editing === 'new' ? 'New schedule' : 'Edit schedule'} onClose={() => setEditing(null)}>
         {editing !== null && <ScheduleForm existing={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
       </Sheet>
@@ -43,6 +43,7 @@ function ScheduleForm({ existing, onClose }: { existing?: CheckSchedule; onClose
   const state = useAppState();
   const floors = sortedFloors(state);
   const [name, setName] = useState(existing?.name ?? '');
+  const [code, setCode] = useState(existing?.code ?? '');
   const [time, setTime] = useState(existing?.time ?? '22:00');
   const [days, setDays] = useState<number[]>(existing?.days ?? [0, 1, 2, 3, 4, 5, 6]);
   const [allFloors, setAllFloors] = useState(existing ? existing.floorIds === 'all' : true);
@@ -55,7 +56,8 @@ function ScheduleForm({ existing, onClose }: { existing?: CheckSchedule; onClose
     if (!name.trim()) return toast('Name the check.', 'error');
     if (!isValidTime(time)) return toast('Enter a time like 22:00.', 'error');
     if (!days.length) return toast('Pick at least one day.', 'error');
-    const input = { name: name.trim(), time, days, floorIds: allFloors ? ('all' as const) : floorIds, reminderMinutes: Math.max(0, reminder), deadlineMinutes: Math.max(0, deadline), active };
+    if (!code.trim()) return toast('Give it a short code for the sheet, like RC.', 'error');
+    const input = { name: name.trim(), code: code.trim().toUpperCase().slice(0, 4), time, days, floorIds: allFloors ? ('all' as const) : floorIds, reminderMinutes: Math.max(0, reminder), deadlineMinutes: Math.max(0, deadline), active };
     if (existing) actions.updateSchedule(existing.id, input);
     else actions.addSchedule(input);
     toast('Saved');
@@ -69,9 +71,10 @@ function ScheduleForm({ existing, onClose }: { existing?: CheckSchedule; onClose
   return (
     <div className="stack">
       <div className="grid-2">
-        <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Evening check" />
+        <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Room check" />
         <TextInput label="Time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
       </div>
+      <TextInput label="Sheet column" value={code} onChange={(e) => setCode(e.target.value)} placeholder="RC" maxLength={4} help="The heading this check gets on the printed sheet. The school's sheet uses W, SH and RC." />
       <div className="field">
         <span className="label">Days</span>
         <div className="row" style={{ gap: 6 }}>

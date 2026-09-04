@@ -3,7 +3,7 @@ import { actions, getState } from '../src/lib/store';
 import { canEditCheck, canReopenCheck, consecutiveAbsences, flaggedBoys, roomStates, slotsForDate, tally } from '../src/lib/checks';
 import { parseRoster } from '../src/lib/roster';
 import { addDays, todayKey } from '../src/lib/dates';
-import { addRA, boy, floor, setupDorm, status } from './helpers';
+import { addRA, boy, floor, setupDorm, singleSchedule, status } from './helpers';
 
 describe('setup', () => {
   beforeEach(() => setupDorm());
@@ -14,7 +14,8 @@ describe('setup', () => {
     expect(s.staff).toHaveLength(1);
     expect(s.staff[0].role).toBe('dean');
     expect(s.statusTypes.map((t) => t.code)).toEqual(['P', 'A', 'AW', 'L', 'INF']);
-    expect(s.schedules).toHaveLength(1);
+    expect(s.schedules.map((t) => t.code)).toEqual(['W', 'SH', 'RC']);
+    expect(s.schedules.every((t) => t.days.join() === '0,1,2,3,4')).toBe(true);
     expect(s.floors).toHaveLength(2);
     expect(s.rooms.filter((r) => r.floorId === floor('Floor 1').id).map((r) => r.number)).toEqual(['101', '102', '103', '104']);
   });
@@ -116,6 +117,7 @@ describe('checks', () => {
   });
 
   it('marks a slot late after the deadline', () => {
+    singleSchedule('22:00', 20);
     const today = todayKey();
     const late = new Date();
     late.setHours(23, 30, 0, 0);
@@ -123,7 +125,7 @@ describe('checks', () => {
     early.setHours(20, 0, 0, 0);
     const lateSlots = slotsForDate(getState(), today, late);
     const earlySlots = slotsForDate(getState(), today, early);
-    expect(lateSlots).toHaveLength(2);
+    expect(lateSlots).toHaveLength(2);  // one per floor
     expect(lateSlots.every((s) => s.pastDeadline)).toBe(true);
     expect(earlySlots.every((s) => !s.pastDeadline && s.minutesUntil === 120)).toBe(true);
   });
@@ -230,7 +232,7 @@ describe('review fixes', () => {
   });
 
   it('keeps a late-night check alive past midnight', () => {
-    actions.updateSchedule(getState().schedules[0].id, { time: '23:50', deadlineMinutes: 20 });
+    singleSchedule('23:50', 20);
     const yesterday = addDays(todayKey(), -1);
     const now = new Date();
     now.setHours(0, 5, 0, 0);

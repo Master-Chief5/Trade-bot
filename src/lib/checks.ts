@@ -60,6 +60,26 @@ export function floorOfBoy(state: Pick<AppState, 'rooms' | 'floors'>, boy: Boy):
   return room ? state.floors.find((f) => f.id === room.floorId) : undefined;
 }
 
+/** Column heading for a check on the printed sheet. Falls back to initials for schedules saved before codes existed. */
+export function scheduleCode(s: Pick<CheckSchedule, 'code' | 'name'>): string {
+  const set = s.code?.trim();
+  if (set) return set.toUpperCase();
+  const initials = s.name.trim().split(/\s+/).map((w) => w[0] ?? '').join('').toUpperCase();
+  return initials.slice(0, 3) || '?';
+}
+
+/** The checks that make up one printed week, earliest in the evening first. */
+export function sheetPeriods(state: Pick<AppState, 'schedules'>): CheckSchedule[] {
+  return state.schedules.filter((s) => s.active).sort((a, b) => a.time.localeCompare(b.time) || a.name.localeCompare(b.name));
+}
+
+/** Weekdays the sheet needs a column block for: every day any active check runs, Sunday first. */
+export function sheetDays(state: Pick<AppState, 'schedules'>): number[] {
+  const days = new Set<number>();
+  sheetPeriods(state).forEach((s) => s.days.forEach((d) => days.add(d)));
+  return [...days].sort((a, b) => a - b);
+}
+
 export function schedulesForDate(state: Pick<AppState, 'schedules'>, date: string): CheckSchedule[] {
   const wd = weekdayOf(date);
   return state.schedules.filter((s) => s.active && s.days.includes(wd)).sort((a, b) => minutesOfDay(a.time) - minutesOfDay(b.time));

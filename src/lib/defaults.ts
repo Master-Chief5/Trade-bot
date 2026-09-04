@@ -8,8 +8,14 @@ export const DEFAULT_STATUS_TYPES: Omit<StatusType, 'id'>[] = [
   { name: 'Infirmary', code: 'INF', color: '#4C7FA8', countsAs: 'excused', requiresNote: false, sortOrder: 4, isDefault: false, useForLeave: false },
 ];
 
+/**
+ * The three checks the Kingsway sheet has a column for, Sunday through Thursday.
+ * Times are a starting point — deans set the real ones in Settings → Check schedules.
+ */
 export const DEFAULT_SCHEDULES: Omit<CheckSchedule, 'id'>[] = [
-  { name: 'Evening check', time: '22:00', days: [0, 1, 2, 3, 4, 5, 6], floorIds: 'all', reminderMinutes: 15, deadlineMinutes: 20, active: true },
+  { name: 'Worship', code: 'W', time: '19:30', days: [0, 1, 2, 3, 4], floorIds: 'all', reminderMinutes: 10, deadlineMinutes: 20, active: true },
+  { name: 'Study hall', code: 'SH', time: '20:30', days: [0, 1, 2, 3, 4], floorIds: 'all', reminderMinutes: 10, deadlineMinutes: 20, active: true },
+  { name: 'Room check', code: 'RC', time: '22:00', days: [0, 1, 2, 3, 4], floorIds: 'all', reminderMinutes: 15, deadlineMinutes: 20, active: true },
 ];
 
 export const DEFAULT_HEAD_RA_PERMISSIONS: HeadRAPermissions = {

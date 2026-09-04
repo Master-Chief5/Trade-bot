@@ -72,6 +72,8 @@ export interface StatusType {
 export interface CheckSchedule {
   id: string;
   name: string;
+  /** Short heading for this check's column on the printed sheet, e.g. "W", "SH", "RC". */
+  code: string;
   /** 24h "HH:MM" local time */
   time: string;
   /** 0 = Sunday … 6 = Saturday */

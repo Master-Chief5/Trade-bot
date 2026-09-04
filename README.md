@@ -12,8 +12,8 @@ Room check stays on paper. This app fills the sheet in. RAs tap through the boys
 - **The check.** Everyone starts as Present. Tap a status to cycle it, tap a name for a note or another status. Boys on the leave board are pre-marked Away. Submit locks the check; a dean (or a permitted head RA within 24 hours) can reopen it.
 - **Floors.** A corridor map per floor that colours itself from tonight's check. Deans add floors, rooms, and move boys between rooms.
 - **Boys.** Roster with search and filters, paste-from-spreadsheet import, room moves with history, removal that keeps past sheets intact.
-- **Print.** Filled check sheet with signature lines, blank check sheet, week-at-a-glance. All built in the browser, so they work offline.
-- **Settings.** Custom status types and their sheet codes, check schedules by day of week, staff and PINs, head RA permissions, leave board, activity log, backup and restore, year rollover with archives.
+- **Print.** The dorm's own weekly check sheet — rooms down the side, one column block per day, one column per check inside it (W, SH, RC), filled in from the week's submitted checks, with a signature and date line per day. Same sheet blank for when a phone is not an option, plus per-night sheets and a week-at-a-glance. All built in the browser, so they work offline.
+- **Settings.** Custom status types and their sheet codes, check schedules by day of week — each one is a column on the printed sheet, so adding a Friday check adds a Friday column — staff and PINs, head RA permissions, leave board, activity log, backup and restore, year rollover with archives.
 - **Light and dark mode**, per device. Installs to the iPhone home screen as a web app. Works offline.
 - **Accounts and sync.** RAs make their own account; a dean activates them with a join code. Every phone then shows the same dorm, and none of it is readable by the server.
 

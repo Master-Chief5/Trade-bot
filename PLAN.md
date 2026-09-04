@@ -125,8 +125,8 @@ Labels: **Must** for the first version the deans use nightly. **Should** for the
 
 ### Printing and PDF (Must)
 
-- **Filled check sheet** for a date and floor, in the school's layout. Signature and date lines at the bottom. One PDF per floor or all floors in one file.
-- **Blank check sheet** with the current roster and empty boxes.
+- **The weekly check sheet**, in the school's own layout: the RA's name in the corner, rooms down the side with one row per bed, a column block per day (Sunday to Thursday) and one column per check inside it — W for worship, SH for study hall, RC for room check. A Total Boys row and a signature and date line per day. The day and check columns come from the schedules the deans set, so the sheet follows the school rather than the other way round.
+- **The same sheet blank**, roster printed and every mark empty, for when a phone is not an option.
 - **Should:** week-at-a-glance grid per floor (boys down the side, nights across, one letter per cell). Per-boy history sheet. Floor map printout with room numbers.
 - Everything prints from the browser, on a phone or a computer. No special software.
 
