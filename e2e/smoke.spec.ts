@@ -81,6 +81,11 @@ test('deans set up the dorm, RAs do a check, the dean sees it', async ({ page })
   await enterPin(page, '2468');
   await expect(page.getByRole('heading', { name: 'Tonight' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Room check' })).toBeVisible();
+  // The sign-off step is visible from the start of the evening, but locked until the check is in.
+  const signButton = page.getByRole('button', { name: 'Sign the sheet' });
+  await expect(page.getByText("Complete today's checks and sign")).toBeVisible();
+  await expect(page.getByText('1 more check to go')).toBeVisible();
+  await expect(signButton).toBeDisabled();
   await page.getByRole('button', { name: 'Start check' }).click();
   await expect(page.getByText('Room 101')).toBeVisible();
   await page.getByRole('button', { name: /Daniel Achebe: Present/ }).click();
@@ -89,9 +94,9 @@ test('deans set up the dorm, RAs do a check, the dean sees it', async ({ page })
   await expect(page.getByText('Submitted', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start check' })).toHaveCount(0);
 
-  // Every check for the day is in, so the RA can sign the sheet off.
-  const signButton = page.getByRole('button', { name: 'Sign the sheet' });
-  await expect(signButton).toBeVisible();
+  // Every check for the day is in, so signing unlocks.
+  await expect(page.getByText('all 1 check in')).toBeVisible();
+  await expect(signButton).toBeEnabled();
   await signButton.click();
   const pad = page.locator('canvas.sigpad');
   await expect(pad).toBeVisible();

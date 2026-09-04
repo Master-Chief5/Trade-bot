@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { dayComplete, signatureFor, slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
+import { checksDueOn, dayComplete, signatureFor, slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
 import { addDays, formatDate, formatDateLong, formatTime12, formatClock, todayKey, DAY_NAMES_LONG, weekdayOf } from '../lib/dates';
 import { can, visibleFloorIds } from '../lib/permissions';
 import { useRemindersEnabled } from '../lib/reminders';
@@ -157,8 +157,12 @@ function SignOff({ user, floorId, date }: { user: StaffUser; floorId: string; da
   const [open, setOpen] = useState(false);
   const floorName = state.floors.find((f) => f.id === floorId)?.name ?? '';
   const signed = signatureFor(state, floorId, date);
+  const due = checksDueOn(state, floorId, date);
+  const done = due.filter((s) => state.checks.some((c) => c.scheduleId === s.id && c.floorId === floorId && c.date === date && c.submittedAt)).length;
   const ready = dayComplete(state, floorId, date);
-  if (!ready && !signed) return null;
+  // Shown from the start of the evening, not only once the checks are in, so the RA can see
+  // the sign-off step coming and knows what is left before it unlocks.
+  if (due.length === 0 && !signed) return null;
 
   const sign = (image: string) => {
     const res = actions.signDay(floorId, date, image, user);
@@ -172,23 +176,28 @@ function SignOff({ user, floorId, date }: { user: StaffUser; floorId: string; da
     if (!res.ok) toast(res.error, 'error');
   };
 
+  const remaining = due.length - done;
+  const subtitle = signed
+    ? `${signed.raName} · ${formatClock(signed.signedAt)} · ${floorName}`
+    : ready
+      ? `${floorName} · all ${due.length} ${due.length === 1 ? 'check' : 'checks'} in`
+      : `${floorName} · ${remaining} more ${remaining === 1 ? 'check' : 'checks'} to go`;
+
   return (
     <>
       <Card pad>
         <div className="stack">
           <div className="row-between" style={{ alignItems: 'center' }}>
             <div>
-              <strong>{signed ? 'Signed off' : 'Sign off for today'}</strong>
-              <div className="muted small">
-                {signed ? `${signed.raName} · ${formatClock(signed.signedAt)} · ${floorName}` : `${floorName} · every check is in`}
-              </div>
+              <strong>{signed ? 'Signed off' : "Complete today's checks and sign"}</strong>
+              <div className="muted small">{subtitle}</div>
             </div>
             {signed && <img src={signed.image} alt={`${signed.raName}'s signature`} className="sig-preview" />}
           </div>
           {signed ? (
             <Button variant="outline" size="sm" onClick={undo}>Sign again</Button>
           ) : (
-            <Button size="lg" block icon="pencil" onClick={() => setOpen(true)}>Sign the sheet</Button>
+            <Button size="lg" block icon="pencil" disabled={!ready} onClick={() => setOpen(true)}>Sign the sheet</Button>
           )}
         </div>
       </Card>
