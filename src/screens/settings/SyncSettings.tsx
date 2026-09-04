@@ -83,7 +83,7 @@ export function SyncSettings({ user }: { user: StaffUser }) {
           <SectionLabel>Join code</SectionLabel>
           <Card pad>
             <div className="stack-sm">
-              <div className="mono" style={{ fontSize: 34, letterSpacing: '0.2em' }}>{online.dorm.joinCode}</div>
+              <div className="mono" style={{ fontSize: 34, letterSpacing: '0.2em' }}>{online.joinCode ?? '······'}</div>
               <p className="muted small">Give this to an RA after they create an account. They enter it, then you approve them below. Make a new code once everyone is in.</p>
               <Button variant="outline" size="sm" onClick={() => void regenerateJoinCode().then((r) => toast(r.ok ? 'New code' : r.error, r.ok ? 'ok' : 'error'))}>New code</Button>
             </div>
@@ -95,7 +95,7 @@ export function SyncSettings({ user }: { user: StaffUser }) {
               <Empty>{loading ? 'Checking…' : 'Nobody is waiting.'}</Empty>
             ) : (
               pending.map((p) => (
-                <ListRow key={p.userId} title={p.name} subtitle={`${p.devices.map((d) => `${d.name} · ${d.fingerprint}`).join(' · ') || 'No phone registered yet'} · asked ${formatDateTime(p.requestedAt)}`} trail={<span className="row" style={{ gap: 6 }}><Button variant="ghost" size="sm" onClick={() => void declineRequest(p.userId).then(reload)}>Decline</Button><Button size="sm" onClick={() => setApproving(p)}>Approve</Button></span>} />
+                <ListRow key={p.userId} title={p.name} subtitle={`${p.devices.length ? `${p.devices.length} phone${p.devices.length === 1 ? '' : 's'} waiting` : 'No phone registered yet'} · asked ${formatDateTime(p.requestedAt)}`} trail={<span className="row" style={{ gap: 6 }}><Button variant="ghost" size="sm" onClick={() => void declineRequest(p.userId).then(reload)}>Decline</Button><Button size="sm" onClick={() => setApproving(p)}>Approve</Button></span>} />
               ))
             )}
           </Card>
@@ -139,8 +139,8 @@ export function SyncSettings({ user }: { user: StaffUser }) {
             request={approving}
             floors={sortedFloors(state).map((f) => ({ id: f.id, name: f.name }))}
             headRAEnabled={state.settings.headRAEnabled}
-            onDone={async (role, floorIds) => {
-              const res = await approveRequest(approving.userId, role, floorIds, user);
+            onDone={async (role, floorIds, deviceIds) => {
+              const res = await approveRequest(approving.userId, role, floorIds, deviceIds, user);
               toast(res.ok ? `${approving.name} is in` : res.error, res.ok ? 'ok' : 'error');
               setApproving(null);
               void reload();
@@ -152,13 +152,13 @@ export function SyncSettings({ user }: { user: StaffUser }) {
   );
 }
 
-function ApproveForm({ request, floors, headRAEnabled, onDone }: { request: PendingRequest; floors: { id: string; name: string }[]; headRAEnabled: boolean; onDone: (role: Role, floorIds: string[]) => Promise<void> }) {
+function ApproveForm({ request, floors, headRAEnabled, onDone }: { request: PendingRequest; floors: { id: string; name: string }[]; headRAEnabled: boolean; onDone: (role: Role, floorIds: string[], deviceIds: string[]) => Promise<void> }) {
   const [role, setRole] = useState<Role>('ra');
   const [floorIds, setFloorIds] = useState<string[]>([]);
+  const [deviceIds, setDeviceIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   return (
     <div className="stack">
-      {request.devices.length === 0 && <Banner kind="warn">They have not opened the app on a phone yet. You can approve now; their phone gets the key when it appears under Members.</Banner>}
       <SelectInput label="Role" value={role} onChange={(e) => setRole(e.target.value as Role)}>
         <option value="ra">RA</option>
         {headRAEnabled && <option value="headra">Head RA</option>}
@@ -174,7 +174,28 @@ function ApproveForm({ request, floors, headRAEnabled, onDone }: { request: Pend
           </Card>
         </div>
       )}
-      <Button size="lg" disabled={busy} onClick={() => { setBusy(true); void onDone(role, role === 'dean' ? [] : floorIds).finally(() => setBusy(false)); }}>{busy ? 'Activating…' : 'Activate'}</Button>
+      <div className="field">
+        <span className="label">Which phones get the dorm key</span>
+        {request.devices.length === 0 ? (
+          <Banner kind="warn">They have not opened the app on a phone yet. Activate them now; approve the phone under Members once it appears.</Banner>
+        ) : (
+          <>
+            <Card>
+              {request.devices.map((d) => (
+                <Toggle
+                  key={d.id}
+                  label={<span className="row" style={{ gap: 8 }}>{d.name}<span className="mono small">{d.fingerprint}</span></span>}
+                  help="Only tick this once the same code shows on their screen."
+                  checked={deviceIds.includes(d.id)}
+                  onChange={(v) => setDeviceIds((ids) => (v ? [...ids, d.id] : ids.filter((x) => x !== d.id)))}
+                />
+              ))}
+            </Card>
+            <div className="help">Ask them to read their code aloud. A phone you do not tick joins with no access until you approve it.</div>
+          </>
+        )}
+      </div>
+      <Button size="lg" disabled={busy} onClick={() => { setBusy(true); void onDone(role, role === 'dean' ? [] : floorIds, deviceIds).finally(() => setBusy(false)); }}>{busy ? 'Activating…' : 'Activate'}</Button>
     </div>
   );
 }

@@ -8,7 +8,7 @@ describe('crypto', () => {
     const ra = await generateDeviceKeyPair();
     const dormKey = await generateDormKey();
     const wrapped = await wrapDormKey(dormKey, dean.privateKey, ra.publicJwk, 'dorm-1:1');
-    const opened = await unwrapDormKey(wrapped, ra.privateKey, dean.publicJwk, 'dorm-1:1');
+    const opened = await unwrapDormKey(wrapped, ra.privateKey, dean.publicJwk, 'dorm-1:1', true);
     expect(await exportDormKey(opened)).toBe(await exportDormKey(dormKey));
   });
 
@@ -32,10 +32,28 @@ describe('crypto', () => {
     await expect(decryptJson(key, tampered, 'dorm-1:1')).rejects.toBeTruthy();
   });
 
-  it('fingerprints public keys', async () => {
+  it('fingerprints public keys with 64 bits, so they cannot be ground out', async () => {
     const a = await generateDeviceKeyPair();
+    const b = await generateDeviceKeyPair();
     const fp = await fingerprint(a.publicJwk);
-    expect(fp).toMatch(/^[0-9A-F]{2}( [0-9A-F]{2}){3}$/);
+    expect(fp).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/);
     expect(await fingerprint(a.publicJwk)).toBe(fp);
+    expect(await fingerprint(b.publicJwk)).not.toBe(fp);
+  });
+
+  it('opens a key non-extractable unless the holder must pass it on', async () => {
+    const dean = await generateDeviceKeyPair();
+    const ra = await generateDeviceKeyPair();
+    const dormKey = await generateDormKey();
+    const wrapped = await wrapDormKey(dormKey, dean.privateKey, ra.publicJwk, 'dorm-1:1');
+
+    const raKey = await unwrapDormKey(wrapped, ra.privateKey, dean.publicJwk, 'dorm-1:1');
+    expect(raKey.extractable).toBe(false);
+    await expect(exportDormKey(raKey)).rejects.toBeTruthy();
+    // It still decrypts; it just cannot be read back out of the browser.
+    expect(await decryptJson(raKey, await encryptJson(dormKey, { ok: 1 }, 'a'), 'a')).toEqual({ ok: 1 });
+
+    const deanKey = await unwrapDormKey(wrapped, ra.privateKey, dean.publicJwk, 'dorm-1:1', true);
+    expect(deanKey.extractable).toBe(true);
   });
 });

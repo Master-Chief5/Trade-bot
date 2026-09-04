@@ -62,6 +62,8 @@ test('dean creates the dorm online, RA joins, is activated, checks, and is remov
   await expect(dean.getByRole('button', { name: 'Approve' })).toBeVisible({ timeout: 60_000 });
   await dean.getByRole('button', { name: 'Approve' }).click();
   await dean.getByRole('switch', { name: 'Floor 1' }).click();
+  // The dean must confirm the phone by its fingerprint; without this it gets no key.
+  await dean.getByRole('switch', { name: /^Device/ }).click();
   await dean.getByRole('button', { name: 'Activate' }).click();
   await expect(dean.getByText(/Alex Reid is in/)).toBeVisible({ timeout: 30_000 });
 

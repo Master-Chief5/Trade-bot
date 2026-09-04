@@ -30,16 +30,26 @@ The goal is that losing the server loses nothing, because the server never held 
   v1.cwCVBiCQFzX7WoJf.S2WI8m09iI2+vBROj4l+hGqzb5cHT3Tfw2l59rCn/Nsuz0Bb…
   ```
 
-- **The server does hold** account emails, device public keys, who belongs to which dorm and in what role, and the timing and size of changes. It does not hold names, rooms, statuses, notes, or anything a boy did.
-- **Removing someone rotates the dorm key.** Their phone keeps whatever it already downloaded — nothing can reach into a phone and erase it — but it cannot read anything from that moment on.
-- **Deans approve every phone, not just every person.** A new phone shows a short fingerprint the dean can compare before approving, so an attacker with a stolen password still cannot read the dorm.
+- **The server does hold** account emails, device public keys, who belongs to which dorm and in what role, and the timing and size of changes. It does not hold names, rooms, statuses, notes, or anything a boy did. Names and the account-to-device list are readable only by people who share a dorm with you.
+- **Only a dean's device can pass the key on.** On every other device the dorm key is imported so the browser will not export it, so a script injected into the page cannot copy it out.
+- **A device never silently skips a change it cannot read.** If decryption fails, sync stops and says so rather than moving past it, because a skipped change means two phones printing different sheets.
+- **Removing someone rotates the dorm key and the join code.** Their phone keeps whatever it already downloaded — nothing can reach into a phone and erase it — but it cannot read anything from that moment on. The database refuses writes under a superseded key, so a device that missed the rotation cannot keep publishing in a key the removed member holds.
+- **Deans approve every phone, not just every person.** Activating someone lists their phones with a 64-bit fingerprint each, and the dean ticks the ones whose code matches what the RA reads out. A phone left unticked joins with no access until it is approved by name. So a stolen password alone does not read the dorm: the attacker's own phone is a phone the dean never confirmed.
 - **Websockets are a bonus, not a requirement.** Everything also polls, because school networks block sockets.
 
 To point the app at your own project, copy `.env.example` to `.env` and apply `supabase/migrations/*.sql`. With no configuration the app simply runs on one device.
 
+### Know this before you rely on it
+
+**If every device holding the dorm key is lost, the dorm cannot be recovered.** Not by the school, not by the hosting provider, not by anyone. That is the other side of the server being unable to read it. Two protections, and you want both:
+
+- Keep at least two dean devices signed in, so one can approve a replacement for the other.
+- Export a backup from Settings → Backup now and then. It writes a plain file to that device, which is the only copy anybody can read without a key.
+
 ## What it does not do yet
 
 - **Reminders while the phone is locked.** In-app reminders fire while the app is open. Locked-phone push needs a server job with VAPID keys.
+- **A printed recovery code**, so a lone dean who loses their only phone can still get back in.
 - **Password recovery without email.** Reset goes through the email on the account.
 - **Leaked-password checking** is available in the hosting project's auth settings and is worth turning on before real use.
 

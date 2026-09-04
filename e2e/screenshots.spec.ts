@@ -17,9 +17,12 @@ async function shot(page: Page, name: string) {
 
 test('capture screens', async ({ page }) => {
   await page.goto('/');
-  // With an online service configured the first screen offers accounts; this test uses the device-only path.
+  // With an online service configured the first screen offers accounts; this test uses the
+  // device-only path. Wait for whichever screen the build lands on before deciding.
   const local = page.getByRole('link', { name: /Set up on this device only/ });
-  if (await local.isVisible().catch(() => false)) await local.click();
+  const dorm = page.getByRole('heading', { name: 'Dorm', exact: true });
+  await expect(local.or(dorm)).toBeVisible();
+  if (await local.isVisible()) await local.click();
   await shot(page, '01-setup-light');
   await page.getByLabel('Dorm name').fill('Ryan Hall');
   await page.getByRole('button', { name: /Next: First dean/ }).click();

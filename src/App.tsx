@@ -85,6 +85,16 @@ function Gate() {
     );
   }
 
+  // The session expired but this device still holds a synced dorm: sign in, do not fall back to PINs.
+  if (online.needsSignIn) {
+    return (
+      <Routes>
+        <Route path="/account" element={<Account />} />
+        <Route path="/*" element={<Navigate to="/account" replace />} />
+      </Routes>
+    );
+  }
+
   // Device-only mode (PIN sign-in), or no account yet.
   return (
     <Routes>

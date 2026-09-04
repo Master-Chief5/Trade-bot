@@ -550,7 +550,8 @@ export const rawActions = {
     if (!c || !c.submittedAt) return { ok: false, error: 'Nothing to reopen.' };
     const isDean = actor.role === 'dean';
     const onVisibleFloor = visibleFloorIds(state, actor).includes(c.floorId);
-    const headRAOk = onVisibleFloor && can(actor, 'reopenCheck', state.headRAPermissions) && hoursSince(c.submittedAt) <= 24;
+    // nowIso() is the event's own timestamp during replay, so every device decides this the same way.
+    const headRAOk = onVisibleFloor && can(actor, 'reopenCheck', state.headRAPermissions) && hoursSince(c.submittedAt, new Date(nowIso())) <= 24;
     if (!isDean && !headRAOk) return { ok: false, error: 'Only a dean can reopen this check.' };
     update((d) => {
       const check = d.checks.find((x) => x.id === checkId);

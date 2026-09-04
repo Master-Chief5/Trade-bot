@@ -93,10 +93,15 @@ export async function wrapDormKey(dormKey: CryptoKey, myPrivate: CryptoKey, thei
   return aesEncrypt(wrapKey, raw, aad);
 }
 
-export async function unwrapDormKey(wrapped: string, myPrivate: CryptoKey, granterPublicJwk: JsonWebKey, aad: string): Promise<CryptoKey> {
+/**
+ * Open a sealed dorm key. `extractable` is true only on a dean's device, which must be able to
+ * re-wrap the key for other devices; elsewhere the key cannot be read back out of the browser,
+ * so a script injected into the page cannot exfiltrate it.
+ */
+export async function unwrapDormKey(wrapped: string, myPrivate: CryptoKey, granterPublicJwk: JsonWebKey, aad: string, extractable = false): Promise<CryptoKey> {
   const wrapKey = await deriveWrapKey(myPrivate, granterPublicJwk);
   const raw = await aesDecrypt(wrapKey, wrapped, aad);
-  return subtle().importKey('raw', raw, { name: 'AES-GCM', length: AES_LEN }, true, ['encrypt', 'decrypt']);
+  return subtle().importKey('raw', raw, { name: 'AES-GCM', length: AES_LEN }, extractable, ['encrypt', 'decrypt']);
 }
 
 export async function encryptJson(dormKey: CryptoKey, value: unknown, aad: string): Promise<string> {
@@ -108,9 +113,14 @@ export async function decryptJson<T = unknown>(dormKey: CryptoKey, payload: stri
   return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }
 
-/** Short fingerprint of a public key so a dean can compare it with the RA's screen. */
+/**
+ * Short fingerprint of a public key, for a dean to compare against the RA's screen before
+ * handing over the dorm key. 64 bits, so an attacker cannot grind out a key that displays
+ * the same fingerprint as someone else's phone.
+ */
 export async function fingerprint(jwk: JsonWebKey): Promise<string> {
   const data = new TextEncoder().encode(`${jwk.x}.${jwk.y}`);
   const hash = new Uint8Array(await subtle().digest('SHA-256', data));
-  return Array.from(hash.slice(0, 4)).map((b) => b.toString(16).padStart(2, '0')).join(' ').toUpperCase();
+  const hex = Array.from(hash.slice(0, 8)).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  return (hex.match(/.{4}/g) ?? []).join(' ');
 }
