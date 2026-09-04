@@ -14,8 +14,11 @@
     "test:e2e": "playwright test",
     "check": "npm run typecheck && npm run lint && npm run test"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
+    "@supabase/supabase-js": "^2.114.0",
     "idb-keyval": "^6.2.1",
     "immer": "^10.1.1",
     "jspdf": "^3.0.1",

@@ -1,3 +1,5 @@
+import { contextTime } from './execution';
+
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const DAY_NAMES_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -80,7 +82,7 @@ export function nowMinutes(d: Date = new Date()): number {
   return d.getHours() * 60 + d.getMinutes();
 }
 
-export const nowIso = () => new Date().toISOString();
+export const nowIso = () => contextTime() ?? new Date().toISOString();
 
 export function isValidTime(hm: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(hm);

@@ -9,6 +9,7 @@ import { uid } from './ids';
 import { nowIso, hoursSince, isDateKey } from './dates';
 import { boysOnFloor, defaultStatusFor, findCheck } from './checks';
 import { can, visibleFloorIds } from './permissions';
+import { randomSeed, runWithContext } from './execution';
 
 const STORAGE_KEY = 'rh-state-v1';
 
@@ -107,10 +108,28 @@ export function replaceState(next: AppState) {
   scheduleSave();
 }
 
+let batching = false;
+
 export function update(recipe: (draft: Draft<AppState>) => void) {
   state = produce(state, recipe);
+  if (batching) return;
   emit();
   scheduleSave();
+}
+
+/** Run several updates and notify once at the end. */
+export function batch(fn: () => void) {
+  const was = batching;
+  batching = true;
+  try {
+    fn();
+  } finally {
+    batching = was;
+  }
+  if (!batching) {
+    emit();
+    scheduleSave();
+  }
 }
 
 export function useAppState(): AppState {
@@ -146,7 +165,7 @@ export interface SetupFloorInput {
 export interface SetupInput {
   dormName: string;
   yearLabel: string;
-  dean: { name: string; pin: string; email?: string };
+  dean: { name: string; pin: string; email?: string; authUserId?: string };
   floors: SetupFloorInput[];
 }
 
@@ -161,7 +180,7 @@ export type Result = { ok: true } | { ok: false; error: string };
 
 // ---------- actions ----------
 
-export const actions = {
+export const rawActions = {
   completeSetup(input: SetupInput): string {
     const deanId = uid('u');
     update((d) => {
@@ -169,7 +188,7 @@ export const actions = {
       d.settings.yearLabel = input.yearLabel.trim() || d.settings.yearLabel;
       const dean: StaffUser = {
         id: deanId, name: input.dean.name.trim(), email: input.dean.email?.trim() || undefined,
-        role: 'dean', pin: input.dean.pin, active: true, floorIds: [], createdAt: nowIso(),
+        role: 'dean', pin: input.dean.pin, authUserId: input.dean.authUserId, active: true, floorIds: [], createdAt: nowIso(),
       };
       d.staff.push(dean);
       if (d.statusTypes.length === 0) d.statusTypes = withIds<StatusType>(DEFAULT_STATUS_TYPES, 's');
@@ -359,6 +378,28 @@ export const actions = {
       Object.assign(s, patch);
       log(d, actor, 'staff.update', s.name);
     });
+  },
+  /** Online mode: attach an approved account to a staff entry, creating it if needed. */
+  linkStaff(input: { authUserId: string; name: string; email?: string; role: StaffUser['role']; floorIds: string[]; staffId?: string }, actor?: StaffUser): string {
+    let id = '';
+    update((d) => {
+      const existing = d.staff.find((s) => s.authUserId === input.authUserId) ?? (input.staffId ? d.staff.find((s) => s.id === input.staffId && !s.authUserId) : undefined);
+      if (existing) {
+        existing.authUserId = input.authUserId;
+        existing.name = input.name.trim() || existing.name;
+        existing.email = input.email?.trim() || existing.email;
+        existing.role = input.role;
+        existing.floorIds = [...input.floorIds];
+        existing.active = true;
+        id = existing.id;
+        log(d, actor, 'staff.update', `${existing.name} (${input.role})`);
+      } else {
+        id = uid('u');
+        d.staff.push({ id, name: input.name.trim(), email: input.email?.trim() || undefined, role: input.role, pin: '', authUserId: input.authUserId, active: true, floorIds: [...input.floorIds], createdAt: nowIso() });
+        log(d, actor, 'staff.add', `${input.name.trim()} (${input.role})`);
+      }
+    });
+    return id;
   },
   setHeadRAPermissions(perms: HeadRAPermissions, actor?: StaffUser) {
     update((d) => {
@@ -591,6 +632,70 @@ export const actions = {
     replaceState(initialState());
   },
 };
+
+// ---------- event recording and replay (used by encrypted sync) ----------
+
+export type ActionName = keyof typeof rawActions;
+
+export interface StoreEvent {
+  /** Also the idempotency key on the server. */
+  seed: string;
+  at: string;
+  name: ActionName;
+  args: unknown[];
+}
+
+const NOT_SYNCED = new Set<ActionName>(['exportJson', 'importJson', 'resetAll']);
+let recorder: ((event: StoreEvent) => void) | null = null;
+
+/** Called with every synced action performed on this device. */
+export function setRecorder(fn: ((event: StoreEvent) => void) | null) {
+  recorder = fn;
+}
+
+/**
+ * Public actions. Each call runs with a fresh seed so the ids and timestamps it generates can be
+ * reproduced on other devices, and is handed to the recorder when sync is on.
+ */
+export const actions: typeof rawActions = new Proxy(rawActions, {
+  get(target, prop: string) {
+    const fn = (target as Record<string, unknown>)[prop];
+    if (typeof fn !== 'function' || NOT_SYNCED.has(prop as ActionName)) return fn;
+    return (...args: unknown[]) => {
+      const seed = randomSeed();
+      const at = new Date().toISOString();
+      const result = runWithContext(seed, at, () => (fn as (...a: unknown[]) => unknown).apply(target, args));
+      recorder?.({ seed, at, name: prop as ActionName, args });
+      return result;
+    };
+  },
+}) as typeof rawActions;
+
+/** Replay one event exactly as it ran on the device that produced it. Never recorded. */
+export function applyEvent(event: StoreEvent) {
+  const fn = rawActions[event.name] as unknown as (...a: unknown[]) => unknown;
+  if (typeof fn !== 'function' || NOT_SYNCED.has(event.name)) return;
+  try {
+    runWithContext(event.seed, event.at, () => fn.apply(rawActions, event.args));
+  } catch (err) {
+    console.warn('Could not replay event', event.name, err);
+  }
+}
+
+/**
+ * Rebase: start from the last server-confirmed state, apply the new confirmed events in server order,
+ * remember that as the new confirmed state, then re-apply this device's still-pending events on top.
+ */
+export function rebase(confirmed: AppState, newlyConfirmed: StoreEvent[], pending: StoreEvent[]): AppState {
+  let nextConfirmed = confirmed;
+  batch(() => {
+    state = confirmed;
+    for (const e of newlyConfirmed) applyEvent(e);
+    nextConfirmed = state;
+    for (const e of pending) applyEvent(e);
+  });
+  return nextConfirmed;
+}
 
 function addRoomsRangeDraft(d: Draft<AppState>, floorId: string, from: number, to: number, capacity: number): number {
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 500) return 0;

@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { loadState, useAppState, useStoreReady } from './lib/store';
+import { initOnline, onlineAvailable, useOnline } from './lib/online';
 import { signOut, useSessionUserId } from './lib/session';
 import { useCurrentUser } from './lib/useCurrentUser';
 import { can, type Capability } from './lib/permissions';
@@ -21,6 +22,11 @@ import { Print } from './screens/Print';
 import { History } from './screens/History';
 import { EnterFromPaper } from './screens/EnterFromPaper';
 import { Settings } from './screens/Settings';
+import { Welcome } from './screens/Welcome';
+import { Account } from './screens/Account';
+import { Join } from './screens/Join';
+import { Waiting } from './screens/Waiting';
+import { SyncSettings } from './screens/settings/SyncSettings';
 import { StatusTypes } from './screens/settings/StatusTypes';
 import { Schedules } from './screens/settings/Schedules';
 import { Staff } from './screens/settings/Staff';
@@ -36,10 +42,11 @@ import { Archives } from './screens/settings/Archives';
 
 export default function App() {
   const ready = useStoreReady();
+  const online = useOnline();
   useEffect(() => {
-    void loadState();
+    void loadState().then(() => initOnline());
   }, []);
-  if (!ready) return <div className="splash">Opening Room Check…</div>;
+  if (!ready || (onlineAvailable && !online.ready)) return <div className="splash">Opening Room Check…</div>;
   return (
     <HashRouter>
       <Gate />
@@ -52,14 +59,40 @@ function Gate() {
   const state = useAppState();
   const user = useCurrentUser();
   const sessionId = useSessionUserId();
+  const online = useOnline();
+  const account = online.session;
   useEffect(() => {
-    if (sessionId && !user) signOut();
-  }, [sessionId, user]);
+    if (!account && sessionId && !user) signOut();
+  }, [account, sessionId, user]);
+
+  if (account) {
+    // Online mode: the account decides where you land.
+    const m = online.membership;
+    let element: ReactNode;
+    if (!m) element = <Join />;
+    else if (m.status === 'revoked') element = <Waiting reason="revoked" />;
+    else if (m.status !== 'active') element = <Waiting reason="pending" />;
+    else if (!online.hasKey) element = <Waiting reason="device" />;
+    else if (!state.setupComplete) element = m.role === 'dean' ? <Setup authUserId={account.user.id} displayName={online.displayName} /> : <Waiting reason="syncing" />;
+    else if (!user) element = <Waiting reason="syncing" />;
+    else element = <Shell user={user} />;
+    return (
+      <Routes>
+        <Route path="/account" element={<Navigate to="/" replace />} />
+        <Route path="/welcome" element={<Navigate to="/" replace />} />
+        <Route path="/*" element={element} />
+      </Routes>
+    );
+  }
+
+  // Device-only mode (PIN sign-in), or no account yet.
   return (
     <Routes>
+      <Route path="/welcome" element={onlineAvailable && !state.setupComplete ? <Welcome /> : <Navigate to="/" replace />} />
+      <Route path="/account" element={onlineAvailable ? <Account /> : <Navigate to="/" replace />} />
       <Route path="/setup" element={state.setupComplete ? <Navigate to="/" replace /> : <Setup />} />
-      <Route path="/signin" element={!state.setupComplete ? <Navigate to="/setup" replace /> : user ? <Navigate to="/" replace /> : <SignIn />} />
-      <Route path="/*" element={!state.setupComplete ? <Navigate to="/setup" replace /> : !user ? <Navigate to="/signin" replace /> : <Shell user={user} />} />
+      <Route path="/signin" element={!state.setupComplete ? <Navigate to={onlineAvailable ? '/welcome' : '/setup'} replace /> : user ? <Navigate to="/" replace /> : <SignIn />} />
+      <Route path="/*" element={!state.setupComplete ? <Navigate to={onlineAvailable ? '/welcome' : '/setup'} replace /> : !user ? <Navigate to="/signin" replace /> : <Shell user={user} />} />
     </Routes>
   );
 }
@@ -98,6 +131,7 @@ function Shell({ user }: { user: StaffUser }) {
           <Route path="paper" element={<Require user={user} cap="enterFromPaper"><EnterFromPaper user={user} /></Require>} />
           <Route path="settings" element={<Settings user={user} />} />
           <Route path="settings/appearance" element={<Appearance />} />
+          <Route path="settings/sync" element={<SyncSettings user={user} />} />
           <Route path="settings/status-types" element={<Require user={user} cap="manageStatusTypes"><StatusTypes /></Require>} />
           <Route path="settings/schedules" element={<Require user={user} cap="manageSchedules"><Schedules /></Require>} />
           <Route path="settings/staff" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><Staff user={user} /></Require>} />

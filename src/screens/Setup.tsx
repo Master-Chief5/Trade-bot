@@ -14,7 +14,7 @@ function defaultFloor(i: number): SetupFloorInput {
   return { name: `Floor ${i + 1}`, roomFrom: (i + 1) * 100 + 1, roomTo: (i + 1) * 100 + 12, capacity: 2, gradeLabel: '' };
 }
 
-export function Setup() {
+export function Setup({ authUserId, displayName }: { authUserId?: string; displayName?: string } = {}) {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [dormName, setDormName] = useState('Ryan Hall');
@@ -23,7 +23,7 @@ export function Setup() {
     const start = new Date().getMonth() >= 6 ? y : y - 1;
     return `${start}–${String(start + 1).slice(-2)}`;
   });
-  const [deanName, setDeanName] = useState('');
+  const [deanName, setDeanName] = useState(displayName ?? '');
   const [deanEmail, setDeanEmail] = useState('');
   const [pin, setPin] = useState('');
   const [pin2, setPin2] = useState('');
@@ -35,8 +35,10 @@ export function Setup() {
     if (step === 0 && !dormName.trim()) e.dormName = 'Give the dorm a name.';
     if (step === 1) {
       if (!deanName.trim()) e.deanName = 'The dean needs a name.';
-      if (!/^\d{4,6}$/.test(pin)) e.pin = 'Use 4 to 6 digits.';
-      else if (pin !== pin2) e.pin2 = 'The PINs do not match.';
+      if (!authUserId) {
+        if (!/^\d{4,6}$/.test(pin)) e.pin = 'Use 4 to 6 digits.';
+        else if (pin !== pin2) e.pin2 = 'The PINs do not match.';
+      }
     }
     if (step === 2) {
       floors.forEach((f, i) => {
@@ -56,8 +58,8 @@ export function Setup() {
   };
   const finish = () => {
     if (!validate()) return;
-    const deanId = actions.completeSetup({ dormName, yearLabel, dean: { name: deanName, pin, email: deanEmail }, floors });
-    signIn(deanId);
+    const deanId = actions.completeSetup({ dormName, yearLabel, dean: { name: deanName, pin: authUserId ? '' : pin, email: deanEmail, authUserId }, floors });
+    if (!authUserId) signIn(deanId);
     toast('Ryan Hall is set up. Next, add the boys.');
     navigate('/boys', { replace: true });
   };
@@ -95,13 +97,15 @@ export function Setup() {
       {step === 1 && (
         <Card pad>
           <div className="stack">
-            <p className="muted small">The first dean owns the app on this phone. More deans, the head RA and the RAs are added later under Staff.</p>
+            <p className="muted small">{authUserId ? 'You are the first dean. RAs and other deans join with the code under Settings → Online sync.' : 'The first dean owns the app on this phone. More deans, the head RA and the RAs are added later under Staff.'}</p>
             <TextInput label="Dean's name" value={deanName} onChange={(e) => setDeanName(e.target.value)} error={errors.deanName} autoFocus autoComplete="name" />
-            <TextInput label="Email (optional)" type="email" value={deanEmail} onChange={(e) => setDeanEmail(e.target.value)} autoComplete="email" />
-            <div className="grid-2">
-              <TextInput label="PIN" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} error={errors.pin} help="4 to 6 digits" />
-              <TextInput label="Confirm PIN" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pin2} onChange={(e) => setPin2(e.target.value.replace(/\D/g, ''))} error={errors.pin2} />
-            </div>
+            {!authUserId && <TextInput label="Email (optional)" type="email" value={deanEmail} onChange={(e) => setDeanEmail(e.target.value)} autoComplete="email" />}
+            {!authUserId && (
+              <div className="grid-2">
+                <TextInput label="PIN" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} error={errors.pin} help="4 to 6 digits" />
+                <TextInput label="Confirm PIN" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pin2} onChange={(e) => setPin2(e.target.value.replace(/\D/g, ''))} error={errors.pin2} />
+              </div>
+            )}
           </div>
         </Card>
       )}

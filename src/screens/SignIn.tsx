@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { onlineAvailable } from '../lib/online';
 import { useAppState } from '../lib/store';
 import { signIn } from '../lib/session';
 import { roleLabel } from '../lib/permissions';
@@ -48,7 +49,7 @@ export function SignIn() {
   const [selected, setSelected] = useState<StaffUser | null>(null);
   const [error, setError] = useState(false);
   const groups = useMemo(() => {
-    const active = state.staff.filter((s) => s.active);
+    const active = state.staff.filter((s) => s.active && s.pin.length >= 4);
     const byRole = (r: StaffUser['role']) => active.filter((s) => s.role === r).sort((a, b) => a.name.localeCompare(b.name));
     return [
       { label: 'Deans', people: byRole('dean') },
@@ -122,6 +123,7 @@ export function SignIn() {
         </div>
       ))}
       <p className="muted small">Sign-in is per phone. Anyone holding this phone can pick a name, so keep your PIN to yourself.</p>
+      {onlineAvailable && <Link to="/account" className="small">Sign in with an online account instead</Link>}
     </div>
   );
 }

@@ -38,7 +38,10 @@ export interface StaffUser {
   name: string;
   email?: string;
   role: Role;
+  /** Device-only sign-in. Empty for staff who sign in with an online account. */
   pin: string;
+  /** Online account this staff member signs in with, when the dorm syncs. */
+  authUserId?: string;
   active: boolean;
   floorIds: string[];
   createdAt: string;

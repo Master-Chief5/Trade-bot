@@ -1,10 +1,11 @@
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
 import { absentOn, canDoCheckOnFloor, flaggedBoys, leaveCovering, schedulesForDate, slotsForDate, tally, type Slot } from '../lib/checks';
 import { formatClock, formatDateLong, formatTime12, todayKey } from '../lib/dates';
 import { can, printableFloorIds } from '../lib/permissions';
 import { filledSheet, openPdf, safeName } from '../lib/pdf';
 import { useNow } from '../lib/useNow';
+import { useOnline } from '../lib/online';
 import type { StaffUser } from '../lib/types';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
@@ -17,6 +18,7 @@ export function DeanTonight({ user }: { user: StaffUser }) {
   const navigate = useNavigate();
   const now = useNow();
   const today = todayKey();
+  const online = useOnline();
 
   const schedules = schedulesForDate(state, today);
   const slots = slotsForDate(state, today, now);
@@ -46,6 +48,11 @@ export function DeanTonight({ user }: { user: StaffUser }) {
         subtitle={schedules.length ? `${submittedCount} of ${slots.length} floor checks in · ${absent.length} absent` : 'No check scheduled today'}
         actions={canPrint ? <Button variant="outline" size="sm" icon="print" onClick={printTonight} disabled={!tonightChecks.length}>Tonight's sheet</Button> : undefined}
       />
+      {user.role === 'dean' && online.pendingRequests > 0 && (
+        <Banner kind="info" icon="user">
+          {online.pendingRequests} {online.pendingRequests === 1 ? 'person is' : 'people are'} waiting to be activated. <Link to="/settings/sync">Open Online sync</Link>
+        </Banner>
+      )}
       <div className="dash-grid">
         <div className="stack">
           {schedules.length === 0 && (

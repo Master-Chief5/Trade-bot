@@ -4,6 +4,8 @@ import { signOut } from '../lib/session';
 import { can, roleLabel } from '../lib/permissions';
 import { notificationPermission, requestNotificationPermission, useRemindersEnabled } from '../lib/reminders';
 import { useTheme } from '../lib/theme';
+import { onlineAvailable, signOutAndWipe, useOnline } from '../lib/online';
+import { formatDateTime } from '../lib/dates';
 import type { StaffUser } from '../lib/types';
 import { Button } from '../ui/Button';
 import { Toggle } from '../ui/Form';
@@ -16,6 +18,8 @@ export function Settings({ user }: { user: StaffUser }) {
   const perms = state.headRAPermissions;
   const [remindersOn, setRemindersOn] = useRemindersEnabled();
   const [theme] = useTheme();
+  const online = useOnline();
+  const syncLabel = !onlineAvailable ? 'Not available in this build' : !online.session ? 'Off · this device only' : online.sync.error ? online.sync.error : online.sync.pendingCount ? `${online.sync.pendingCount} waiting to upload` : online.sync.lastSyncAt ? `Synced ${formatDateTime(online.sync.lastSyncAt)}` : 'Connecting…';
   const floors = user.floorIds.map((id) => state.floors.find((f) => f.id === id)?.name).filter(Boolean).join(', ');
   const isDean = user.role === 'dean';
 
@@ -34,6 +38,7 @@ export function Settings({ user }: { user: StaffUser }) {
       <Card>
         <ListRow icon={theme === 'dark' ? 'moon' : theme === 'light' ? 'sun' : 'monitor'} to="/settings/appearance" title="Appearance" subtitle={theme === 'system' ? 'Follows your phone' : theme === 'dark' ? 'Dark' : 'Light'} chevron />
         <Toggle label="Reminders on this phone" help="A notification before each of your checks while the app is open. Locked-phone reminders arrive with the online version." checked={remindersOn} onChange={toggleReminders} />
+        <ListRow icon={online.sync.error ? 'alert' : 'sync'} to="/settings/sync" title="Online sync" subtitle={syncLabel} chevron />
       </Card>
 
       {(isDean || can(user, 'manageRAs', perms) || can(user, 'assignRAs', perms) || can(user, 'viewAllFloors', perms)) && (
@@ -66,8 +71,15 @@ export function Settings({ user }: { user: StaffUser }) {
           )}
         </>
       )}
-      <Button variant="outline" icon="logout" onClick={() => { signOut(); navigate('/signin', { replace: true }); }}>Sign out</Button>
-      <p className="muted small">Room Check {state.settings.yearLabel} · data is stored on this device only.</p>
+      <Button variant="outline" icon="logout" onClick={() => {
+        if (online.session) {
+          if (window.confirm('Sign out and remove the dorm data from this device? Sign in again to download it.')) void signOutAndWipe().then(() => navigate('/', { replace: true }));
+          return;
+        }
+        signOut();
+        navigate('/signin', { replace: true });
+      }}>Sign out</Button>
+      <p className="muted small">Room Check {state.settings.yearLabel} · {online.session ? 'encrypted on this device, synced through the server as ciphertext.' : 'data is stored on this device only.'}</p>
     </>
   );
 }
