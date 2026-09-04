@@ -16,6 +16,7 @@ export function Print({ user }: { user: StaffUser }) {
   const [date, setDate] = useState(todayKey());
   const [floorSel, setFloorSel] = useState('all');
   const [scheduleName, setScheduleName] = useState(state.schedules[0]?.name ?? 'Room check');
+  const [templateId, setTemplateId] = useState(state.sheetTemplates[0]?.id ?? '');
   const allowed = useMemo(() => printableFloorIds(state, user), [state, user]);
   const floors = useMemo(() => sortedFloors(state).filter((f) => allowed.includes(f.id)), [state, allowed]);
   const floorIds = useMemo(() => (floorSel === 'all' ? floors.map((f) => f.id) : [floorSel]), [floorSel, floors]);
@@ -34,6 +35,7 @@ export function Print({ user }: { user: StaffUser }) {
   const sheetFloor = floorSel === 'all' ? floors[0]?.id : floorSel;
   const sheetFloorName = floors.find((f) => f.id === sheetFloor)?.name ?? '';
   const raOfFloor = state.staff.find((s) => s.active && s.role === 'ra' && sheetFloor !== undefined && s.floorIds.includes(sheetFloor));
+  const template = state.sheetTemplates.find((t) => t.id === templateId) ?? state.sheetTemplates[0];
   const dorm = safeName(state.settings.dormName);
 
   const make = (build: () => jsPDF, name: string, how: 'open' | 'download') => {
@@ -50,20 +52,20 @@ export function Print({ user }: { user: StaffUser }) {
   const docs = [
     {
       key: 'sheet',
-      title: `Check sheet · week of ${formatDateShort(sunday)}`,
+      title: `${template?.name ?? 'Check sheet'} · week of ${formatDateShort(sunday)}`,
       desc: sheetFloor
-        ? `${sheetFloorName}: rooms down the side, one column per check per day, filled in from the week's submitted checks. This is the sheet that gets signed.`
+        ? `${sheetFloorName}: rooms down the side, one column per check per day, filled in from the week's submitted checks, with each day's signature where the RA signed off. This is the sheet that gets filed.`
         : 'Add a floor first.',
       disabled: !sheetFloor,
-      build: () => raSheet(state, sheetFloor as string, sunday, { raName: raOfFloor?.name }),
+      build: () => raSheet(state, sheetFloor as string, sunday, { raName: raOfFloor?.name, template }),
       name: `${dorm}-sheet-${sunday}.pdf`,
     },
     {
       key: 'sheet-blank',
-      title: 'Check sheet · blank',
+      title: `${template?.name ?? 'Check sheet'} · blank`,
       desc: 'The same sheet with the roster printed and every mark left empty. For when a phone is not an option.',
       disabled: !sheetFloor,
-      build: () => raSheet(state, sheetFloor as string, sunday, { blank: true }),
+      build: () => raSheet(state, sheetFloor as string, sunday, { blank: true, template }),
       name: `${dorm}-sheet-blank.pdf`,
     },
     {
@@ -104,6 +106,11 @@ export function Print({ user }: { user: StaffUser }) {
               {floors.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </SelectInput>
           </div>
+          {state.sheetTemplates.length > 1 && (
+            <SelectInput label="Sheet" value={template?.id ?? ''} onChange={(e) => setTemplateId(e.target.value)}>
+              {state.sheetTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </SelectInput>
+          )}
           {state.schedules.length > 1 && (
             <SelectInput label="Blank sheet heading" value={scheduleName} onChange={(e) => setScheduleName(e.target.value)}>
               {state.schedules.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}

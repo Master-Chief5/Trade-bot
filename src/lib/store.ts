@@ -2,11 +2,11 @@ import { produce, type Draft } from 'immer';
 import { get, set } from 'idb-keyval';
 import { useSyncExternalStore } from 'react';
 import type {
-  AppState, Boy, CheckSchedule, Floor, HeadRAPermissions, Leave, Room, RoomType, StaffUser, StatusType,
+  AppState, Boy, CheckSchedule, DaySignature, Floor, HeadRAPermissions, Leave, Room, RoomType, SheetTemplate, StaffUser, StatusType,
 } from './types';
 import { DEFAULT_HEAD_RA_PERMISSIONS, DEFAULT_SCHEDULES, DEFAULT_STATUS_TYPES, initialState } from './defaults';
 import { uid } from './ids';
-import { nowIso, hoursSince, isDateKey } from './dates';
+import { nowIso, hoursSince, isDateKey, weekdayOf } from './dates';
 import { boysOnFloor, defaultStatusFor, findCheck } from './checks';
 import { can, visibleFloorIds } from './permissions';
 import { randomSeed, runWithContext } from './execution';
@@ -97,6 +97,8 @@ function migrate(s: AppState): AppState {
     settings: { ...base.settings, ...s.settings },
     headRAPermissions: { ...DEFAULT_HEAD_RA_PERMISSIONS, ...s.headRAPermissions },
     floors: (s.floors ?? []).map((f) => ({ ...f, layout: f.layout ?? 'corridor' })),
+    sheetTemplates: s.sheetTemplates ?? [],
+    signatures: s.signatures ?? [],
   };
 }
 
@@ -193,6 +195,12 @@ export const rawActions = {
       d.staff.push(dean);
       if (d.statusTypes.length === 0) d.statusTypes = withIds<StatusType>(DEFAULT_STATUS_TYPES, 's');
       if (d.schedules.length === 0) d.schedules = withIds<CheckSchedule>(DEFAULT_SCHEDULES, 'sch');
+      if (d.sheetTemplates.length === 0) {
+        d.sheetTemplates = [{
+          id: uid('sht'), name: 'Sunday to Thursday', days: [0, 1, 2, 3, 4],
+          scheduleIds: d.schedules.map((x) => x.id), roomIds: 'floor', sortOrder: 0,
+        }];
+      }
       input.floors.forEach((f, i) => {
         const floor: Floor = { id: uid('f'), name: f.name.trim() || `Floor ${i + 1}`, sortOrder: i, gradeLabel: f.gradeLabel?.trim() || undefined, layout: 'corridor' };
         d.floors.push(floor);
@@ -471,6 +479,53 @@ export const rawActions = {
       if (s) Object.assign(s, patch);
     });
   },
+  addSheetTemplate(input: Omit<SheetTemplate, 'id' | 'sortOrder'>): string {
+    const id = uid('sht');
+    update((d) => { d.sheetTemplates.push({ ...input, id, sortOrder: d.sheetTemplates.length }); });
+    return id;
+  },
+  updateSheetTemplate(id: string, patch: Partial<Omit<SheetTemplate, 'id'>>) {
+    update((d) => {
+      const t = d.sheetTemplates.find((x) => x.id === id);
+      if (t) Object.assign(t, patch);
+    });
+  },
+  deleteSheetTemplate(id: string): Result {
+    if (getState().sheetTemplates.length <= 1) return { ok: false, error: 'Keep at least one sheet.' };
+    update((d) => { d.sheetTemplates = d.sheetTemplates.filter((x) => x.id !== id); });
+    return { ok: true };
+  },
+
+  /**
+   * An RA signing off one day on one floor. Bound to that day and floor so a signature
+   * cannot be lifted onto another night: re-signing replaces their own, and nobody else's.
+   */
+  signDay(floorId: string, date: string, image: string, actor: StaffUser): Result {
+    if (!image.startsWith('data:image/png;base64,')) return { ok: false, error: 'That is not a signature.' };
+    if (actor.role !== 'dean' && !actor.floorIds.includes(floorId)) return { ok: false, error: 'That floor is not yours.' };
+    const state = getState();
+    const due = state.schedules.filter((s) => s.active && s.days.includes(weekdayOf(date))
+      && (s.floorIds === 'all' || s.floorIds.includes(floorId)));
+    if (due.length === 0) return { ok: false, error: 'No checks were scheduled that day.' };
+    const done = due.every((s) => state.checks.some((c) => c.scheduleId === s.id && c.floorId === floorId && c.date === date && c.submittedAt));
+    if (!done) return { ok: false, error: 'Finish and submit the day\'s checks first.' };
+    update((d) => {
+      d.signatures = d.signatures.filter((x) => !(x.raId === actor.id && x.floorId === floorId && x.date === date));
+      d.signatures.push({ id: uid('sig'), raId: actor.id, raName: actor.name, floorId, date, image, signedAt: nowIso() });
+      log(d, actor, 'Signed a day', `${date} · ${d.floors.find((f) => f.id === floorId)?.name ?? floorId}`);
+    });
+    return { ok: true };
+  },
+  unsignDay(floorId: string, date: string, actor: StaffUser): Result {
+    const mine = (x: DaySignature) => x.floorId === floorId && x.date === date && (actor.role === 'dean' || x.raId === actor.id);
+    if (!getState().signatures.some(mine)) return { ok: false, error: 'Nothing signed for that day.' };
+    update((d) => {
+      d.signatures = d.signatures.filter((x) => !mine(x));
+      log(d, actor, 'Removed a signature', `${date} · ${d.floors.find((f) => f.id === floorId)?.name ?? floorId}`);
+    });
+    return { ok: true };
+  },
+
   deleteSchedule(id: string) {
     update((d) => { d.schedules = d.schedules.filter((s) => s.id !== id); });
   },
@@ -601,12 +656,13 @@ export const rawActions = {
       d.archives.unshift({
         id: uid('y'), label: d.settings.yearLabel, archivedAt: nowIso(),
         floors: [...d.floors], rooms: [...d.rooms], boys: [...d.boys], checks: [...d.checks], leaves: [...d.leaves],
-        statusTypes: [...d.statusTypes], moves: [...d.moves],
+        statusTypes: [...d.statusTypes], moves: [...d.moves], signatures: [...d.signatures],
       });
       d.boys = [];
       d.checks = [];
       d.leaves = [];
       d.moves = [];
+      d.signatures = [];
       d.staff.forEach((s) => { if (s.role !== 'dean') s.active = false; });
       d.settings.yearLabel = newYearLabel.trim() || d.settings.yearLabel;
       log(d, actor, 'year.rollover', `Archived ${d.archives[0].label}, started ${d.settings.yearLabel}`);

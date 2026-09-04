@@ -84,6 +84,36 @@ export interface CheckSchedule {
   active: boolean;
 }
 
+/**
+ * A sheet the deans have designed: which days it covers, which checks get a column,
+ * and which rooms are listed. One dorm can keep several — a Sunday-to-Thursday sheet
+ * and a separate weekend one, say — and print whichever it needs.
+ */
+export interface SheetTemplate {
+  id: string;
+  name: string;
+  /** Weekday numbers, 0 = Sunday, that get a column block. */
+  days: number[];
+  /** Checks that get a column inside each day's block, in this order. */
+  scheduleIds: string[];
+  /** Rooms listed as rows, or 'floor' for every room on whichever floor is printed. */
+  roomIds: string[] | 'floor';
+  sortOrder: number;
+}
+
+/** An RA's drawn signature for one day on one floor, printed onto that day's line. */
+export interface DaySignature {
+  id: string;
+  raId: string;
+  raName: string;
+  floorId: string;
+  /** "YYYY-MM-DD" local */
+  date: string;
+  /** PNG data URL of what they drew. */
+  image: string;
+  signedAt: string;
+}
+
 export interface CheckEntry {
   boyId: string;
   name: string;
@@ -150,6 +180,7 @@ export interface ArchivedYear {
   /** Snapshotted so archived sheets keep their codes even if a status is deleted later. */
   statusTypes?: StatusType[];
   moves?: Move[];
+  signatures?: DaySignature[];
 }
 
 export interface Settings {
@@ -172,7 +203,9 @@ export interface AppState {
   headRAPermissions: HeadRAPermissions;
   statusTypes: StatusType[];
   schedules: CheckSchedule[];
+  sheetTemplates: SheetTemplate[];
   checks: Check[];
+  signatures: DaySignature[];
   leaves: Leave[];
   moves: Move[];
   audit: AuditEntry[];

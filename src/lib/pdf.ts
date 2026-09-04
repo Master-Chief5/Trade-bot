@@ -1,11 +1,11 @@
 import { jsPDF } from 'jspdf';
 import autoTable, { type CellInput, type RowInput, type UserOptions } from 'jspdf-autotable';
-import type { AppState, Check, StatusType } from './types';
+import type { AppState, Check, SheetTemplate, StatusType } from './types';
 import { addDays, formatClock, formatDateLong, formatDateShort, formatTime12, DAY_NAMES, DAY_NAMES_LONG } from './dates';
-import { boysOnFloor, roomOccupants, roomsOnFloor, scheduleCode, sheetDays, sheetPeriods, sortedStatusTypes, statusById, tally } from './checks';
+import { boysOnFloor, roomOccupants, scheduleCode, sheetDays, sortedStatusTypes, statusById, tally, templatePeriods, templateRooms } from './checks';
 
 type StateLike = Pick<AppState, 'settings' | 'statusTypes' | 'floors' | 'rooms' | 'boys' | 'checks'>;
-type SheetStateLike = StateLike & Pick<AppState, 'schedules'>;
+type SheetStateLike = StateLike & Pick<AppState, 'schedules' | 'signatures'>;
 
 const PAGE_W = 215.9;
 const PAGE_H = 279.4;
@@ -90,37 +90,46 @@ export interface RASheetOptions {
   printNames?: boolean;
   /** Leave every mark blank — the backup sheet for a lost phone. */
   blank?: boolean;
+  /** Which designed sheet to print. Falls back to every active check on the days they run. */
+  template?: SheetTemplate;
 }
+
+/** Mark boxes are square: a tick should sit in a box, not a letterbox. */
+const BOX = 6.5;
+const NAME_W_MAX = 62;
+const NAME_W_MIN = 34;
+const ROOM_W = 11;
 
 /**
  * The dorm's own weekly check sheet: rooms down the side, one column block per day,
  * one column per check inside it. This is the sheet that gets signed and handed in,
- * so its shape follows the school's, not ours — the day and check columns come from
- * the schedules the deans set, so adding a Friday check adds a Friday column.
+ * so its shape follows the school's, not ours — the days, the checks and the rooms all
+ * come from the sheet the deans designed in Settings.
  */
 export function raSheet(state: SheetStateLike, floorId: string, sundayKey: string, opts: RASheetOptions = {}): jsPDF {
-  const { raName, printNames = true, blank = false } = opts;
+  const { raName, printNames = true, blank = false, template } = opts;
   const floor = state.floors.find((f) => f.id === floorId);
-  const periods = sheetPeriods(state);
-  const days = sheetDays(state);
+  const periods = templatePeriods(state, template);
+  const days = template ? [...template.days].sort((a, b) => a - b) : sheetDays(state);
   const slots = days.length * periods.length;
 
-  const landscape = slots > 15;
-  const doc = newDoc(landscape);
+  // Portrait as long as the square boxes and a usable name column still fit across the page.
+  const needed = ROOM_W + BOX * slots + NAME_W_MIN;
+  const landscape = needed > PAGE_W - 2 * M;
   const pageW = landscape ? PAGE_H : PAGE_W;
+  const pageH = landscape ? PAGE_W : PAGE_H;
   const textW = pageW - 2 * M;
 
-  const roomW = 11;
-  let nameW = 40;
-  let cellW = slots ? (textW - nameW - roomW) / slots : textW - nameW - roomW;
-  if (cellW < 7 && slots) {
-    cellW = 7;
-    nameW = Math.max(22, textW - roomW - cellW * slots);
-  }
-  const fontSize = cellW < 8.5 ? 7.5 : 9;
+  const nameW = Math.max(NAME_W_MIN, Math.min(NAME_W_MAX, textW - ROOM_W - BOX * slots));
+  const tableW = nameW + ROOM_W + BOX * slots;
+  const left = M + Math.max(0, (textW - tableW) / 2);
 
+  const blockW = periods.length * BOX;
   const dayKeys = days.map((d) => addDays(sundayKey, d));
-  const rooms = roomsOnFloor(state, floorId).filter((r) => r.type !== 'unused');
+  const rooms = templateRooms(state, floorId, template);
+
+  const offDay = (p: (typeof periods)[number], d: number): boolean =>
+    !p.days.includes(d) && days.some((x) => p.days.includes(x));
 
   const codeFor = (boyId: string, dayKey: string, scheduleId: string): string => {
     if (blank) return '';
@@ -133,7 +142,7 @@ export function raSheet(state: SheetStateLike, floorId: string, sundayKey: strin
     [
       { content: raName ? `RA: ${raName}` : 'RA:', rowSpan: 2, styles: { halign: 'left' as const, valign: 'middle' as const } },
       { content: 'Rm#', rowSpan: 2, styles: { halign: 'center' as const, valign: 'middle' as const } },
-      ...days.map((d) => ({ content: DAY_NAMES_LONG[d], colSpan: periods.length, styles: { halign: 'center' as const } })),
+      ...days.map((d) => ({ content: blockW >= 17 ? DAY_NAMES_LONG[d] : DAY_NAMES[d], colSpan: periods.length, styles: { halign: 'center' as const, overflow: 'hidden' as const } })),
     ],
     days.flatMap(() => periods.map((p) => ({ content: scheduleCode(p), styles: { halign: 'center' as const } }))),
   ];
@@ -149,8 +158,7 @@ export function raSheet(state: SheetStateLike, floorId: string, sundayKey: strin
       const name = boy && printNames ? `${boy.preferredName?.trim() || boy.firstName} ${boy.lastName}` : '';
       const cells: CellInput[] = days.flatMap((d, di) =>
         periods.map((p) => {
-          const runsToday = p.days.includes(d);
-          if (!runsToday) return { content: '', styles: { fillColor: [238, 238, 238] as [number, number, number] } };
+          if (offDay(p, d)) return { content: '', styles: { fillColor: [238, 238, 238] as [number, number, number] } };
           return { content: boy ? codeFor(boy.id, dayKeys[di], p.id) : '' };
         }),
       );
@@ -161,7 +169,7 @@ export function raSheet(state: SheetStateLike, floorId: string, sundayKey: strin
 
   const totals: CellInput[] = days.flatMap((d, di) =>
     periods.map((p) => {
-      if (blank || !p.days.includes(d)) return { content: '' };
+      if (blank || offDay(p, d)) return { content: '' };
       const check = state.checks.find((c) => c.floorId === floorId && c.date === dayKeys[di] && c.scheduleId === p.id && c.submittedAt);
       if (!check) return { content: '' };
       const present = check.entries.filter((e) => statusById(state, e.statusId)?.countsAs === 'present').length;
@@ -169,51 +177,65 @@ export function raSheet(state: SheetStateLike, floorId: string, sundayKey: strin
     }),
   );
 
-  const columnStyles: UserOptions['columnStyles'] = { 0: { cellWidth: nameW, halign: 'left' }, 1: { cellWidth: roomW, halign: 'center' } };
-  for (let i = 0; i < slots; i += 1) columnStyles[2 + i] = { cellWidth: cellW, halign: 'center' };
+  const columnStyles: UserOptions['columnStyles'] = { 0: { cellWidth: nameW, halign: 'left' }, 1: { cellWidth: ROOM_W, halign: 'center' } };
+  // Tight padding and no wrapping: a two- or three-letter code must sit on one line,
+  // or that row grows taller than the rest and the grid stops being a grid.
+  for (let i = 0; i < slots; i += 1) columnStyles[2 + i] = { cellWidth: BOX, halign: 'center', cellPadding: 0.4, overflow: 'hidden' };
 
+  const doc = newDoc(landscape);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(20);
-  const title = [state.settings.dormName, floor?.name, `Week of ${formatDateShort(sundayKey)}`].filter(Boolean).join('  ·  ');
-  doc.text(title, M, M + 4);
+  const title = [state.settings.dormName, floor?.name, template?.name, `Week of ${formatDateShort(sundayKey)}`].filter(Boolean).join('  ·  ');
+  doc.text(title, left, M + 4);
 
   autoTable(doc, {
     theme: 'grid',
     startY: M + 8,
-    margin: { left: M, right: M, top: M + 8 },
-    styles: { font: 'helvetica', fontSize, cellPadding: 1.4, lineColor: [90, 90, 90], lineWidth: 0.2, textColor: 20, minCellHeight: 6.4 },
-    headStyles: { fillColor: [232, 232, 232], textColor: 20, fontStyle: 'bold', fontSize: Math.min(fontSize, 8.5) },
-    footStyles: { fillColor: [246, 246, 246], textColor: 20, fontStyle: 'bold', fontSize },
+    margin: { left, right: M, top: M + 8 },
+    tableWidth: tableW,
+    styles: { font: 'helvetica', fontSize: 8, cellPadding: { top: 0.6, bottom: 0.6, left: 1.2, right: 1.2 }, lineColor: [90, 90, 90], lineWidth: 0.2, textColor: 20, minCellHeight: BOX, valign: 'middle' },
+    headStyles: { fillColor: [232, 232, 232], textColor: 20, fontStyle: 'bold', fontSize: 7.5, minCellHeight: BOX },
+    footStyles: { fillColor: [246, 246, 246], textColor: 20, fontStyle: 'bold', fontSize: 8, minCellHeight: BOX },
     head,
     body,
     foot: [[{ content: 'Total Boys:', styles: { halign: 'left' as const } }, { content: String(boyCount), styles: { halign: 'center' as const } }, ...totals]],
     columnStyles,
   });
 
-  let y = finalY(doc) + 7;
+  let y = finalY(doc) + 6;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(90);
-  doc.text(`${legend(sortedStatusTypes(state))}   ·   shaded = no check scheduled   ·   Total Boys row counts those marked present`, M, y);
+  doc.text(`${legend(sortedStatusTypes(state))}   ·   shaded = this check does not run that day`, left, y);
   doc.setTextColor(20);
   y += 7;
 
-  const perRow = landscape ? 3 : 2;
+  // One signature line per day, with the RA's drawn signature dropped onto it when they signed off.
+  // Sized from the page, not the table: a narrow sheet must not squash the labels together.
+  const perRow = Math.max(1, Math.floor(textW / 88));
   const colW = textW / perRow;
-  doc.setFontSize(8.5);
+  const lineW = colW * 0.5;
+  doc.setFontSize(8);
   days.forEach((d, i) => {
-    const col = i % perRow;
-    const row = Math.floor(i / perRow);
-    const x = M + col * colW;
-    const lineY = y + row * 12 + 6;
-    if (lineY > (landscape ? PAGE_W : PAGE_H) - M) return;
+    const x = M + (i % perRow) * colW;
+    const lineY = y + Math.floor(i / perRow) * 15 + 9;
+    if (lineY > pageH - M) return;
+    const signed = blank ? undefined : state.signatures.find((sg) => sg.floorId === floorId && sg.date === dayKeys[i]);
+    if (signed) {
+      try {
+        doc.addImage(signed.image, 'PNG', x + 1, lineY - 8.5, lineW - 2, 8, undefined, 'FAST');
+      } catch {
+        // A signature that will not decode must not take the sheet down with it.
+      }
+    }
     doc.setDrawColor(60);
     doc.setLineWidth(0.3);
-    doc.line(x, lineY, x + colW * 0.52, lineY);
-    doc.line(x + colW * 0.58, lineY, x + colW - 6, lineY);
-    doc.text(`${DAY_NAMES_LONG[d]} — R.A. signature`, x, lineY + 3.6);
-    doc.text('Date', x + colW * 0.58, lineY + 3.6);
+    doc.line(x, lineY, x + lineW, lineY);
+    doc.line(x + lineW + 4, lineY, x + colW - 5, lineY);
+    doc.setTextColor(20);
+    doc.text(`${DAY_NAMES_LONG[d]} — R.A. signature`, x, lineY + 3.4);
+    doc.text(signed ? formatDateShort(signed.date) : 'Date', x + lineW + 4, lineY + 3.4);
   });
 
   return doc;

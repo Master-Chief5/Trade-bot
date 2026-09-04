@@ -29,6 +29,7 @@ import { Waiting } from './screens/Waiting';
 import { SyncSettings } from './screens/settings/SyncSettings';
 import { StatusTypes } from './screens/settings/StatusTypes';
 import { Schedules } from './screens/settings/Schedules';
+import { Sheets } from './screens/settings/Sheets';
 import { Staff } from './screens/settings/Staff';
 import { StaffEdit } from './screens/settings/StaffEdit';
 import { HeadRA } from './screens/settings/HeadRA';
@@ -144,6 +145,7 @@ function Shell({ user }: { user: StaffUser }) {
           <Route path="settings/sync" element={<SyncSettings user={user} />} />
           <Route path="settings/status-types" element={<Require user={user} cap="manageStatusTypes"><StatusTypes /></Require>} />
           <Route path="settings/schedules" element={<Require user={user} cap="manageSchedules"><Schedules /></Require>} />
+          <Route path="settings/sheets" element={<Require user={user} cap="manageSchedules"><Sheets /></Require>} />
           <Route path="settings/staff" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><Staff user={user} /></Require>} />
           <Route path="settings/staff/new" element={<Require user={user} cap="manageRAs"><StaffEdit user={user} /></Require>} />
           <Route path="settings/staff/:id" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><StaffEdit user={user} /></Require>} />

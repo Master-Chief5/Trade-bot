@@ -1,4 +1,4 @@
-import type { AppState, Boy, Check, CheckSchedule, Floor, Leave, Room, StaffUser, StatusType } from './types';
+import type { AppState, Boy, Check, CheckSchedule, Floor, Leave, Room, SheetTemplate, StaffUser, StatusType } from './types';
 import { dateInRange, hoursSince, minutesOfDay, parseKey, weekdayOf } from './dates';
 import { can, visibleFloorIds } from './permissions';
 
@@ -66,6 +66,22 @@ export function scheduleCode(s: Pick<CheckSchedule, 'code' | 'name'>): string {
   if (set) return set.toUpperCase();
   const initials = s.name.trim().split(/\s+/).map((w) => w[0] ?? '').join('').toUpperCase();
   return initials.slice(0, 3) || '?';
+}
+
+/** The checks a designed sheet gives a column to, in the order the dean arranged them. */
+export function templatePeriods(state: Pick<AppState, 'schedules'>, template?: Pick<SheetTemplate, 'scheduleIds'>): CheckSchedule[] {
+  if (!template) return sheetPeriods(state);
+  return template.scheduleIds
+    .map((id) => state.schedules.find((s) => s.id === id))
+    .filter((s): s is CheckSchedule => Boolean(s));
+}
+
+/** The rooms a designed sheet lists as rows, in the sheet's own order. */
+export function templateRooms(state: Pick<AppState, 'rooms'>, floorId: string, template?: Pick<SheetTemplate, 'roomIds'>): Room[] {
+  const onFloor = roomsOnFloor(state, floorId).filter((r) => r.type !== 'unused');
+  if (!template || template.roomIds === 'floor') return onFloor;
+  const byId = new Map(onFloor.map((r) => [r.id, r]));
+  return template.roomIds.map((id) => byId.get(id)).filter((r): r is Room => Boolean(r));
 }
 
 /** The checks that make up one printed week, earliest in the evening first. */
@@ -252,6 +268,23 @@ export function canReopenCheck(state: Pick<AppState, 'headRAPermissions' | 'floo
 
 export function slotsForUser(state: AppState, user: StaffUser, date: string, now: Date = new Date()): Slot[] {
   return slotsForDate(state, date, now, visibleFloorIds(state, user));
+}
+
+/** The checks that were due on a floor that day — what an RA has to finish before signing off. */
+export function checksDueOn(state: Pick<AppState, 'schedules'>, floorId: string, date: string): CheckSchedule[] {
+  const wd = weekdayOf(date);
+  return state.schedules.filter((s) => s.active && s.days.includes(wd) && (s.floorIds === 'all' || s.floorIds.includes(floorId)));
+}
+
+/** Whether every check due on a floor that day has been submitted, so the day can be signed. */
+export function dayComplete(state: Pick<AppState, 'schedules' | 'checks'>, floorId: string, date: string): boolean {
+  const due = checksDueOn(state, floorId, date);
+  if (due.length === 0) return false;
+  return due.every((s) => state.checks.some((c) => c.scheduleId === s.id && c.floorId === floorId && c.date === date && c.submittedAt));
+}
+
+export function signatureFor(state: Pick<AppState, 'signatures'>, floorId: string, date: string) {
+  return state.signatures.find((s) => s.floorId === floorId && s.date === date);
 }
 
 export function roomOccupants(state: Pick<AppState, 'boys'>, roomId: string): Boy[] {

@@ -49,6 +49,7 @@ export function Settings({ user }: { user: StaffUser }) {
             {isDean && <ListRow icon="floors" to="/floors" title="Floors and rooms" subtitle="Tap Edit on the Floors tab" chevron />}
             {isDean && <ListRow icon="check" to="/settings/status-types" title="Status types" subtitle={state.statusTypes.map((s) => s.code).join(' · ')} chevron />}
             {isDean && <ListRow icon="clock" to="/settings/schedules" title="Check schedules" subtitle={`${state.schedules.filter((s) => s.active).length} active`} chevron />}
+            {isDean && <ListRow icon="sheet" to="/settings/sheets" title="Check sheets" subtitle={state.sheetTemplates.map((t) => t.name).join(' · ') || 'None yet'} chevron />}
             {(isDean || can(user, 'manageRAs', perms) || can(user, 'assignRAs', perms)) && <ListRow icon="boys" to="/settings/staff" title="Staff" subtitle={`${state.staff.filter((s) => s.active).length} active`} chevron />}
             {isDean && <ListRow icon="user" to="/settings/head-ra" title="Head RA permissions" subtitle={state.settings.headRAEnabled ? `${Object.values(perms).filter(Boolean).length} of ${Object.keys(perms).length} switches on` : 'No head RA this year'} chevron />}
             {isDean && <ListRow icon="calendar" to="/settings/leave" title="Leave board" subtitle="Sign boys out ahead of time" chevron />}

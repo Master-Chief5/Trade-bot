@@ -360,3 +360,21 @@ table.plain th { font-size: 12px; text-transform: uppercase; letter-spacing: .06
 .audit-row { padding: 10px 14px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
 .audit-row:last-child { border-bottom: none; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* Signature pad. Fixed 15:4 box so what an RA draws matches what prints. */
+.sigpad {
+  width: 100%;
+  aspect-ratio: 15 / 4;
+  border: 1px dashed var(--rule);
+  border-radius: 10px;
+  background: #fff;
+  touch-action: none;
+  cursor: crosshair;
+  display: block;
+}
+.sig-preview {
+  max-height: 56px;
+  border-radius: 6px;
+  background: #fff;
+  padding: 2px 6px;
+}

@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
+import { dayComplete, signatureFor, slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
 import { addDays, formatDate, formatDateLong, formatTime12, formatClock, todayKey, DAY_NAMES_LONG, weekdayOf } from '../lib/dates';
 import { can, visibleFloorIds } from '../lib/permissions';
 import { useRemindersEnabled } from '../lib/reminders';
@@ -10,6 +11,9 @@ import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { Banner, Card, ListRow, PageHeader, SectionLabel, Empty } from '../ui/Layout';
 import { Counts } from '../ui/StatusPill';
+import { Sheet } from '../ui/Sheet';
+import { SignaturePad } from '../ui/SignaturePad';
+import { toast } from '../ui/toast';
 
 export function RAHome({ user }: { user: StaffUser }) {
   const state = useAppState();
@@ -97,6 +101,7 @@ export function RAHome({ user }: { user: StaffUser }) {
           </Card>
         );
       })}
+      {floorIds.map((id) => <SignOff key={id} user={user} floorId={id} date={today} />)}
       {nextUpcoming && slots.length > 0 && (
         <Card>
           <ListRow icon="calendar" title={nextUpcoming.slot.schedule.name} subtitle={`${DAY_NAMES_LONG[weekdayOf(nextUpcoming.date)]} · ${formatTime12(nextUpcoming.slot.schedule.time)} · ${nextUpcoming.slot.floor.name}`} trail={<span className="small muted">Next</span>} />
@@ -140,4 +145,56 @@ export function SlotTag({ slot }: { slot: Slot }) {
   if (slot.minutesUntil > 0 && slot.minutesUntil <= 90) return <span className="tag lamp">Starts in {slot.minutesUntil} min</span>;
   if (slot.minutesUntil > 90) return <span className="tag neutral">At {formatTime12(slot.schedule.time)}</span>;
   return <span className="tag lamp">Due now</span>;
+}
+
+/**
+ * An RA signs off a floor for the day once every check due on it is in. The signature is
+ * bound to that floor and date, so it lands on one line of the sheet and cannot be moved
+ * to another night.
+ */
+function SignOff({ user, floorId, date }: { user: StaffUser; floorId: string; date: string }) {
+  const state = useAppState();
+  const [open, setOpen] = useState(false);
+  const floorName = state.floors.find((f) => f.id === floorId)?.name ?? '';
+  const signed = signatureFor(state, floorId, date);
+  const ready = dayComplete(state, floorId, date);
+  if (!ready && !signed) return null;
+
+  const sign = (image: string) => {
+    const res = actions.signDay(floorId, date, image, user);
+    if (!res.ok) return toast(res.error, 'error');
+    setOpen(false);
+    toast('Signed');
+  };
+  const undo = () => {
+    if (!window.confirm(`Remove your signature for ${floorName} today?`)) return;
+    const res = actions.unsignDay(floorId, date, user);
+    if (!res.ok) toast(res.error, 'error');
+  };
+
+  return (
+    <>
+      <Card pad>
+        <div className="stack">
+          <div className="row-between" style={{ alignItems: 'center' }}>
+            <div>
+              <strong>{signed ? 'Signed off' : 'Sign off for today'}</strong>
+              <div className="muted small">
+                {signed ? `${signed.raName} · ${formatClock(signed.signedAt)} · ${floorName}` : `${floorName} · every check is in`}
+              </div>
+            </div>
+            {signed && <img src={signed.image} alt={`${signed.raName}'s signature`} className="sig-preview" />}
+          </div>
+          {signed ? (
+            <Button variant="outline" size="sm" onClick={undo}>Sign again</Button>
+          ) : (
+            <Button size="lg" block icon="pencil" onClick={() => setOpen(true)}>Sign the sheet</Button>
+          )}
+        </div>
+      </Card>
+      <Sheet open={open} title={`Sign for ${formatDate(date)}`} onClose={() => setOpen(false)}>
+        <SignaturePad onDone={sign} onCancel={() => setOpen(false)} />
+      </Sheet>
+    </>
+  );
 }

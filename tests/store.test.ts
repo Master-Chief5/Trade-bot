@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { actions, getState } from '../src/lib/store';
-import { canEditCheck, canReopenCheck, consecutiveAbsences, flaggedBoys, roomStates, slotsForDate, tally } from '../src/lib/checks';
+import { canEditCheck, canReopenCheck, consecutiveAbsences, dayComplete, flaggedBoys, roomStates, signatureFor, slotsForDate, tally, templatePeriods, templateRooms } from '../src/lib/checks';
 import { parseRoster } from '../src/lib/roster';
-import { addDays, todayKey } from '../src/lib/dates';
+import { addDays, todayKey, weekStartSunday } from '../src/lib/dates';
 import { addRA, boy, floor, setupDorm, singleSchedule, status } from './helpers';
 
 describe('setup', () => {
@@ -248,5 +248,101 @@ describe('review fixes', () => {
     expect(getState().archives[0].statusTypes?.map((s) => s.code)).toEqual(['P', 'A', 'AW', 'L', 'INF']);
     expect(getState().archives[0].moves?.length).toBe(5);
     expect(getState().moves).toHaveLength(0);
+  });
+});
+
+describe('sheets and signing off', () => {
+  let dean: ReturnType<typeof setupDorm>['dean'];
+  beforeEach(() => {
+    ({ dean } = setupDorm());
+  });
+
+  it('seeds one sheet covering every default check', () => {
+    const [sheet] = getState().sheetTemplates;
+    expect(sheet.name).toBe('Sunday to Thursday');
+    expect(sheet.days).toEqual([0, 1, 2, 3, 4]);
+    expect(sheet.scheduleIds).toEqual(getState().schedules.map((s) => s.id));
+    expect(sheet.roomIds).toBe('floor');
+  });
+
+  it('keeps a weekend sheet separate from the weekday one', () => {
+    const rc = getState().schedules.find((s) => s.code === 'RC')!;
+    const rooms = getState().rooms.filter((r) => r.floorId === floor('Floor 1').id).slice(0, 2).map((r) => r.id);
+    actions.addSheetTemplate({ name: 'Weekend', days: [5, 6], scheduleIds: [rc.id], roomIds: rooms });
+    const weekend = getState().sheetTemplates.find((t) => t.name === 'Weekend')!;
+    expect(templatePeriods(getState(), weekend).map((p) => p.code)).toEqual(['RC']);
+    expect(templateRooms(getState(), floor('Floor 1').id, weekend)).toHaveLength(2);
+    // The weekday sheet is untouched by the new one.
+    expect(getState().sheetTemplates[0].days).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('refuses to delete the last sheet', () => {
+    expect(actions.deleteSheetTemplate(getState().sheetTemplates[0].id).ok).toBe(false);
+    actions.addSheetTemplate({ name: 'Second', days: [6], scheduleIds: [getState().schedules[0].id], roomIds: 'floor' });
+    expect(actions.deleteSheetTemplate(getState().sheetTemplates[0].id).ok).toBe(true);
+  });
+
+  it('drops a deleted room from the sheets that listed it', () => {
+    const rooms = getState().rooms.filter((r) => r.floorId === floor('Floor 1').id).map((r) => r.id);
+    actions.addSheetTemplate({ name: 'Some rooms', days: [0], scheduleIds: [getState().schedules[0].id], roomIds: rooms });
+    const sheet = getState().sheetTemplates.find((t) => t.name === 'Some rooms')!;
+    actions.moveBoy(boy('Achebe').id, null);
+    actions.moveBoy(boy('Bell').id, null);
+    actions.deleteRoom(rooms[0]);
+    expect(templateRooms(getState(), floor('Floor 1').id, sheet).map((r) => r.id)).not.toContain(rooms[0]);
+  });
+
+  const SIG = 'data:image/png;base64,iVBORw0KGgo=';
+
+  it('will not let an RA sign a day whose checks are not all in', () => {
+    const ra = addRA('Alex', ['Floor 1'], dean);
+    const sunday = weekStartSunday(todayKey());
+    const first = actions.startCheck(getState().schedules[0].id, floor('Floor 1').id, sunday, ra);
+    actions.submitCheck(first, ra);
+    // Two of the three checks are still outstanding.
+    expect(dayComplete(getState(), floor('Floor 1').id, sunday)).toBe(false);
+    expect(actions.signDay(floor('Floor 1').id, sunday, SIG, ra).ok).toBe(false);
+  });
+
+  it('signs a day off once every check is submitted, and only for a floor of theirs', () => {
+    const ra = addRA('Alex', ['Floor 1'], dean);
+    const other = addRA('Sam', ['Floor 2'], dean);
+    const sunday = weekStartSunday(todayKey());
+    getState().schedules.forEach((s) => {
+      const id = actions.startCheck(s.id, floor('Floor 1').id, sunday, ra);
+      actions.submitCheck(id, ra);
+    });
+    expect(dayComplete(getState(), floor('Floor 1').id, sunday)).toBe(true);
+    expect(actions.signDay(floor('Floor 1').id, sunday, SIG, other).ok).toBe(false);
+    expect(actions.signDay(floor('Floor 1').id, sunday, SIG, ra).ok).toBe(true);
+    expect(signatureFor(getState(), floor('Floor 1').id, sunday)?.raName).toBe('Alex');
+
+    // Signing again replaces their own rather than stacking up.
+    expect(actions.signDay(floor('Floor 1').id, sunday, SIG, ra).ok).toBe(true);
+    expect(getState().signatures).toHaveLength(1);
+
+    // A signature belongs to the day it was made for, and cannot be lifted to another.
+    expect(signatureFor(getState(), floor('Floor 1').id, addDays(sunday, 1))).toBeUndefined();
+    expect(actions.unsignDay(floor('Floor 1').id, sunday, other).ok).toBe(false);
+    expect(actions.unsignDay(floor('Floor 1').id, sunday, ra).ok).toBe(true);
+    expect(getState().signatures).toHaveLength(0);
+  });
+
+  it('rejects anything that is not a PNG signature', () => {
+    const ra = addRA('Alex', ['Floor 1'], dean);
+    const sunday = weekStartSunday(todayKey());
+    getState().schedules.forEach((s) => actions.submitCheck(actions.startCheck(s.id, floor('Floor 1').id, sunday, ra), ra));
+    expect(actions.signDay(floor('Floor 1').id, sunday, 'javascript:alert(1)', ra).ok).toBe(false);
+    expect(actions.signDay(floor('Floor 1').id, sunday, 'data:image/svg+xml;base64,PHN2Zz4=', ra).ok).toBe(false);
+  });
+
+  it('archives signatures with the year and starts the new one clean', () => {
+    const ra = addRA('Alex', ['Floor 1'], dean);
+    const sunday = weekStartSunday(todayKey());
+    getState().schedules.forEach((s) => actions.submitCheck(actions.startCheck(s.id, floor('Floor 1').id, sunday, ra), ra));
+    actions.signDay(floor('Floor 1').id, sunday, SIG, ra);
+    actions.archiveYear('2027–28', dean);
+    expect(getState().archives[0].signatures).toHaveLength(1);
+    expect(getState().signatures).toHaveLength(0);
   });
 });
