@@ -3,7 +3,14 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// GitHub Pages serves a project site from /<repo>/, so the built asset URLs, the service
+// worker scope and the manifest all have to agree on that prefix. Everywhere else — local
+// dev, the preview server the browser tests drive, a host serving from a domain root — the
+// base stays "/". The Pages workflow is the only thing that sets this.
+const base = process.env.PAGES_BASE ?? '/';
+
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
@@ -16,7 +23,9 @@ export default defineConfig({
         theme_color: '#24466E',
         background_color: '#F5F6F3',
         display: 'standalone',
-        start_url: '/',
+        id: base,
+        scope: base,
+        start_url: base,
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
