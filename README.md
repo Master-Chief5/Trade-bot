@@ -1,188 +1,88 @@
-# Paper Trader — crypto & stocks
+# Ryan Hall Room Check
 
-A watch-only trading dashboard for **crypto and US stocks/ETFs**. You tell it
-**how much you have**, it watches the live market in real time, and it logs the
-**BUY/SELL trades it would make** — all **simulated against a balance you
-choose**. You watch the trade feed and **copy any trade into your own account
-by hand** if you decide to.
+A web app for the RAs and deans of Ryan Hall, the boys' residence at Kingsway College, Oshawa.
 
-> **Paper mode only.** This app never places a real order, never connects to a
-> brokerage or exchange account, and never touches another app. "Copy a trade"
-> is something *you* do manually, at your own risk. It's a learning tool, not
-> financial advice. Automated real-money trading off an LLM reading charts is a
-> reliable way to lose money — that's deliberately not what this does.
+Room check stays on paper. This app fills the sheet in. RAs tap through the boys on their floor at check time, the app compiles the results into the check-sheet layout as a PDF, and the deans print and sign it. Deans keep the roster, floors and rooms in the app. Anyone can print a blank sheet when a phone is not an option.
 
-The whole app runs on your device (phone or browser) — there is no backend.
+**The server never sees a boy's name.** Phones sync through a relay that only ever holds encrypted blobs. See [Accounts and encryption](#accounts-and-encryption).
 
-## Get the Android app (APK)
+## What it does today
 
-Every push to `main` builds an APK automatically. On your phone:
+- **Three interfaces from one login.** RAs see tonight's checks for their floors. Deans see every floor, who is absent, who is late, and the settings. The head RA gets whatever switches the deans turn on.
+- **The check.** Everyone starts as Present. Tap a status to cycle it, tap a name for a note or another status. Boys on the leave board are pre-marked Away. Submit locks the check; a dean (or a permitted head RA within 24 hours) can reopen it.
+- **Floors.** A corridor map per floor that colours itself from tonight's check. Deans add floors, rooms, and move boys between rooms.
+- **Boys.** Roster with search and filters, paste-from-spreadsheet import, room moves with history, removal that keeps past sheets intact.
+- **Print.** The dorm's own weekly check sheet — rooms down the side, square mark boxes, one column block per day and one column per check inside it, filled in from the week's submitted checks, with each day's signature where the RA signed off. Same sheet blank for when a phone is not an option, plus per-night sheets and a week-at-a-glance. All built in the browser, so they work offline.
+- **Who does what.** Deans put a named person on a check for a date range. A named check leaves everyone else's list, so two RAs on one floor are not both waiting for the other. When a check is late, the dean taps Remind and it lands on that person's home screen.
+- **Handing a check over.** An RA who cannot make it shows a QR code. Whoever is covering scans it with their phone camera — no account, no app — types their full name, and gets that one floor for the nights the RA chose. What they send back becomes an ordinary check with both names on it. The code works once and dies after a minute; access ends on its own after the last night, and the RA or a dean can end it sooner. The relay only ever holds ciphertext: the key travels in the QR code's URL fragment, which browsers never send to a server.
+- **Signing off.** When every check due on a floor that day is submitted, the RA draws their signature on their phone and it lands on that day's line of the printed sheet. It is tied to that floor and date, so it cannot be moved to another night, and a dean or the RA can clear it and sign again.
+- **Settings.** Custom status types and their sheet codes, check schedules by day of week, a sheet designer where deans build the sheets themselves — days, which checks get a column and in what order, and exactly which rooms are listed, so a weekend sheet can sit alongside the Sunday-to-Thursday one — staff and PINs, head RA permissions, leave board, activity log, backup and restore, year rollover with archives.
+- **Light and dark mode**, per device. Installs to the iPhone home screen as a web app. Works offline.
+- **Accounts and sync.** RAs make their own account; a dean activates them with a join code. Every phone then shows the same dorm, and none of it is readable by the server.
 
-1. Open the [**apk-latest** release](https://github.com/Master-Chief5/Trade-bot/releases/tag/apk-latest)
-   and download `crypto-paper-trader.apk`.
-2. Open the downloaded file and allow installing from your browser when Android
-   asks ("install unknown apps").
-3. It's a debug-signed build for personal use, so Android may show an extra
-   warning — that's expected for sideloaded apps.
+## Accounts and encryption
 
-Auto-watch runs while the app is open; closing the app pauses it.
+The goal is that losing the server loses nothing, because the server never held anything.
 
-## Run it on a computer
+- **Each device makes its own key pair** the first time it opens the app. The private key is generated non-extractable by the browser and never leaves the phone — not in a backup, not to us, not to the server.
+- **Each dorm has one dorm key.** A dean's phone generates it when they turn on sync.
+- **Activating someone hands their phone the dorm key sealed to it.** The dean's phone derives a shared secret from its own private key and that phone's public key (ECDH P-256), and wraps the dorm key with it. Only that phone can unwrap it. The server relays the sealed blob and cannot open it.
+- **Everything else is AES-GCM ciphertext.** Every change an RA makes is encrypted on the phone before upload and decrypted after download. What the server stores looks like this, and that is the whole row:
 
-```bash
-npm install
-npm start
-# open http://localhost:3000
-```
+  ```
+  v1.cwCVBiCQFzX7WoJf.S2WI8m09iI2+vBROj4l+hGqzb5cHT3Tfw2l59rCn/Nsuz0Bb…
+  ```
 
-The server only serves static files — all logic runs in the page.
-(Note: stock data needs the Android app or the simulator on desktop — see below.)
+- **The server does hold** account emails, device public keys, who belongs to which dorm and in what role, and the timing and size of changes. It does not hold names, rooms, statuses, notes, or anything a boy did. Names and the account-to-device list are readable only by people who share a dorm with you.
+- **Only a dean's device can pass the key on.** On every other device the dorm key is imported so the browser will not export it, so a script injected into the page cannot copy it out.
+- **A device never silently skips a change it cannot read.** If decryption fails, sync stops and says so rather than moving past it, because a skipped change means two phones printing different sheets.
+- **Removing someone rotates the dorm key and the join code.** Their phone keeps whatever it already downloaded — nothing can reach into a phone and erase it — but it cannot read anything from that moment on. The database refuses writes under a superseded key, so a device that missed the rotation cannot keep publishing in a key the removed member holds.
+- **Deans approve every phone, not just every person.** Activating someone lists their phones with a 64-bit fingerprint each, and the dean ticks the ones whose code matches what the RA reads out. A phone left unticked joins with no access until it is approved by name. So a stolen password alone does not read the dorm: the attacker's own phone is a phone the dean never confirmed.
+- **Websockets are a bonus, not a requirement.** Everything also polls, because school networks block sockets.
 
-## Live updates
+To point the app at your own project, copy `.env.example` to `.env` and apply `supabase/migrations/*.sql`. With no configuration the app simply runs on one device.
 
-- **Crypto prices stream in real time** over exchange WebSockets
-  (Binance, falling back to Coinbase) — the price, chart and unrealized P&L
-  tick continuously, and the source chip shows **LIVE**.
-- While Auto-watch is ON, a fresh decision is made **every time a 1-minute
-  candle closes**, plus on your configured check interval (down to every 5s).
-- **Stocks** poll Yahoo Finance every 15s (there's no public stock WebSocket).
-  Stock prices only move during US market hours (9:30–16:00 ET, Mon–Fri);
-  outside those hours the source chip says "market closed".
-- New trades flash in the feed the moment they execute.
+### Know this before you rely on it
 
-## Assets
+**If every device holding the dorm key is lost, the dorm cannot be recovered.** Not by the school, not by the hosting provider, not by anyone. That is the other side of the server being unable to read it. Two protections, and you want both:
 
-- **Crypto:** BTC, ETH, SOL, XRP, DOGE, ADA — live from Binance/Coinbase
-  public APIs (no account needed), in the app *and* in desktop browsers.
-- **Stocks & ETFs:** AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, SPY — live
-  from Yahoo Finance **in the Android app**. Desktop browsers block Yahoo's
-  API (CORS), so on a computer stocks run on the built-in simulator instead.
-- If a live source is unreachable, the app falls back to a **market
-  simulator** so it keeps working — the data source is always labelled
-  (`live:binance` / `live:coinbase` / `live:yahoo` / `simulated`).
+- Keep at least two dean devices signed in, so one can approve a replacement for the other.
+- Export a backup from Settings → Backup now and then. It writes a plain file to that device, which is the only copy anybody can read without a key.
 
-## Trade sizing
+## What it does not do yet
 
-By default **the bot chooses its own trade size**: it stakes a share of
-available cash equal to its confidence (82% confident → 82% of cash).
-Untick "Let it choose the trade size" to use a fixed **$ per trade** instead.
-Selling always closes the whole position.
+- **Reminders while the phone is locked.** In-app reminders fire while the app is open. Locked-phone push needs a server job with VAPID keys.
+- **A printed recovery code**, so a lone dean who loses their only phone can still get back in.
+- **Password recovery without email.** Reset goes through the email on the account.
+- **Leaked-password checking** is available in the hosting project's auth settings and is worth turning on before real use.
 
-## How the analyzers work together
-
-The bot has two brains that collaborate on every check:
-
-1. A **multi-signal chart-math heuristic** (EMA trend + fresh cross +
-   momentum + RSI extremes + 20-bar breakout, combined into a weighted
-   score) screens the market every minute — free, instant.
-2. An optional **AI model** is consulted whenever the decision could matter:
-   the heuristic sees a possible setup, leans strongly, or a position is
-   open. If both agree, the trade fires with boosted confidence; if the AI
-   says HOLD, it vetoes the entry; if they call opposite directions, the bot
-   stands aside. The AI also gets the heuristic's readout in its prompt.
-
-The `bot:` chip shows what ran last — `heuristic+nvidia` when they worked
-together, `heuristic · nvidia on standby` while nothing is happening, or the
-error reason when an AI call failed and chart-math carried on alone.
-
-To enable the AI half, paste an API key into **Setup → AI key** and hit Save
-(it's stored in your bot's database, in a table only the bot can read). The
-provider is detected from the key:
-
-- **Claude** (`sk-ant-…` keys): the Anthropic Messages API —
-  [platform.claude.com](https://platform.claude.com) → API keys.
-- **NVIDIA** (`nvapi-…` keys): an NVIDIA-hosted open model
-  (`meta/llama-3.3-70b-instruct`) via [build.nvidia.com](https://build.nvidia.com).
-
-**Cost note:** consulting the AI spends API credit, but the screen-first
-design keeps that to decision moments rather than every check, and the bot
-never re-analyzes more than once per 15s no matter how hard the app nudges
-it. (News sentiment from earlier versions is off in the unified bot for now.)
-
-## Settings
-
-- **How much you have** — your starting balance; "Set & reset" applies it and clears history.
-- **Asset** — crypto (BTC, ETH, SOL, XRP, DOGE, ADA) or stocks (AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, SPY).
-  Switching applies instantly — chart, price and feed follow the new pick.
-- **Let it choose the trade size** — confidence-scaled position sizing (default ON).
-- **$ per trade** — fixed size of each simulated buy (when auto-size is off).
-- **Confidence threshold** — minimum analyzer confidence (0–100) to open a
-  position. Signal-based exits use a lower bar (threshold − 15) — cutting a
-  position takes less evidence than opening one.
-- **Take profit / Stop loss %** — automatic exits, checked on every live price
-  tick: a position up ≥ take-profit % or down ≥ stop-loss % is sold instantly
-  (defaults +1% / −0.5%; 0 disables). These bypass threshold and cooldown.
-- **Check interval** — how often the open app refreshes the chart and nudges
-  the bot (min 5s; candle-close nudges happen automatically too).
-- **AI key** — optional; Claude (`sk-ant-…`) or NVIDIA (`nvapi-…`). Saved to
-  your bot when you hit Save settings.
-- **Check now** — ask the bot for an extra check immediately.
-- **Bot on/off** — pauses/resumes the bot itself (in the cloud). It keeps
-  running with the app closed; pausing here stops it everywhere.
-
-Save settings pushes everything (including the AI key) to the bot; settings
-edited while offline apply the next time Save succeeds.
-
-## How a decision is made
-
-There is **one bot**, and it lives in the cloud (a Supabase Edge Function,
-ticked once a minute by `pg_cron` + `pg_net`). The app is its dashboard and
-remote control — and while the app is open, it accelerates the bot: a nudge
-on every closed 1-minute candle and the instant a live tick crosses
-take-profit/stop-loss, so reactions are near-instant when you're watching
-and steady once-a-minute when you're not. Each check:
-
-1. Pull the last ~100 one-minute candles for the chosen asset (server-side:
-   Binance → Coinbase for crypto, Yahoo for stocks, with a short-lived candle
-   cache to ride out rate limits; stocks stand down outside US market hours).
-2. If a position is past take-profit/stop-loss, sell instantly — before any
-   analysis, bypassing threshold and cooldown.
-3. The analyzers (heuristic screen + AI confirm/veto, see above) produce
-   `{ signal, confidence, reasoning, setup_type }`.
-4. The paper engine executes if confidence clears the bar (entry: threshold,
-   default 60; exit: threshold − 15), it's not in cooldown (1 min default),
-   and position rules allow (one position at a time; BUY opens, SELL closes).
-5. Executed trades flash the whole screen green (BUY) or red (SELL) — also
-   when the app syncs in trades the bot made while it was closed.
-
-The dashboard draws a **candlestick chart** with BUY/SELL markers where the
-bot traded, and a **"money over time" graph**: the bot records its equity
-once a minute (kept in its state, thinned as it grows), so the P&L curve
-keeps building around the clock and the app draws it against a dashed
-starting-balance line.
-
-State lives in Postgres (`trade_bot_state`; the AI key in
-`trade_bot_secrets`, readable only by the function). The endpoint requires
-no auth (it guards only fake-money state); anyone with the exact URL could
-read or reconfigure the paper bot — an accepted trade-off for a personal
-tool. The function source lives in `supabase/functions/trade-bot/index.ts`.
-
-## Project layout
-
-```
-public/                    The whole app (vanilla HTML/CSS/JS, no build step)
-  app.js                     Dashboard UI
-  js/engine.js               Chart/price upkeep for the dashboard
-  js/priceFeed.js            Real-time price stream (WebSocket/poll/simulated)
-  js/marketData.js           Candles: Binance/Coinbase/Yahoo + offline simulator
-  js/analyzer.js             (legacy in-app analyzer; the bot embeds its own copy)
-  js/paperEngine.js          (legacy in-app engine; the bot embeds its own copy)
-  js/store.js                localStorage state
-  js/cloud.js                Client for the bot (read state, send commands)
-supabase/functions/trade-bot/index.ts  Cloud bot (Supabase Edge Function)
-src/server.js              Tiny static server for desktop use
-capacitor.config.json      Android wrapper config
-.github/workflows/android.yml  Builds + publishes the APK
-```
-
-## Building the APK yourself
-
-GitHub Actions does this on every push to `main`. To build locally instead
-(needs the Android SDK + Java 21):
+## Run it
 
 ```bash
 npm install
-npx cap add android
-cd android && ./gradlew assembleDebug
-# APK lands in android/app/build/outputs/apk/debug/app-debug.apk
+npm run dev        # http://localhost:5173
+npm run check      # typecheck, lint, unit tests
+npm run build      # production build in dist/
+npm run test:e2e   # browser smoke test against the build (needs Chromium)
 ```
+
+The two-device online test is opt-in, because it talks to a real project and needs two
+confirmed accounts:
+
+```bash
+E2E_ONLINE=1 E2E_DEAN_EMAIL=… E2E_RA_EMAIL=… E2E_PASSWORD=… npx playwright test e2e/online.spec.ts
+```
+
+It signs a dean in, creates the dorm, has an RA join and get activated, runs a check on the
+RA's device, verifies it appears on the dean's, then removes the RA and checks their access ends.
+
+Deploy `dist/` to any static host (Vercel, Netlify, GitHub Pages). The app uses hash routing, so no server rewrites are needed. If you host under a sub-path, set Vite's `base` accordingly.
+
+## Layout
+
+- `src/lib` — data model, store with IndexedDB persistence, check logic, permissions, PDF generation, roster parsing, `crypto.ts` (key handling) and `online.ts` (accounts, approvals, encrypted sync).
+- `supabase/migrations` — the database schema, row-level security and the join/approve functions.
+- `src/screens` — one file per screen; `screens/settings` for dean tools.
+- `src/ui` — buttons, rows, sheets, form controls, icons.
+- `tests` — unit tests (Vitest). `e2e` — Playwright smoke test.
+- `PLAN.md` — the project plan the app follows.
