@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { actions, getState } from '../src/lib/store';
-import { canEditCheck, canReopenCheck, consecutiveAbsences, dayComplete, flaggedBoys, roomStates, signatureFor, slotsForDate, tally, templatePeriods, templateRooms } from '../src/lib/checks';
+import { canEditCheck, canReopenCheck, consecutiveAbsences, dayComplete, flaggedBoys, nudgesFor, roomStates, signatureFor, slotsForDate, slotsForUser, tally, templatePeriods, templateRooms } from '../src/lib/checks';
 import { parseRoster } from '../src/lib/roster';
 import { addDays, todayKey, weekStartSunday } from '../src/lib/dates';
 import { addRA, boy, floor, setupDorm, singleSchedule, status } from './helpers';
@@ -344,5 +344,106 @@ describe('sheets and signing off', () => {
     actions.archiveYear('2027–28', dean);
     expect(getState().archives[0].signatures).toHaveLength(1);
     expect(getState().signatures).toHaveLength(0);
+  });
+});
+
+describe('assignments, reminders and covers', () => {
+  let dean: ReturnType<typeof setupDorm>['dean'];
+  beforeEach(() => {
+    ({ dean } = setupDorm());
+    singleSchedule('22:00', 20);
+  });
+
+  it('gives a named check to that person alone', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const sam = addRA('Sam', ['Floor 1'], dean);
+    const today = todayKey();
+    // Unassigned, both RAs on the floor see it.
+    expect(slotsForUser(getState(), alex, today)).toHaveLength(1);
+    expect(slotsForUser(getState(), sam, today)).toHaveLength(1);
+
+    const sched = getState().schedules[0].id;
+    expect(actions.addAssignment({ raId: alex.id, floorId: floor('Floor 1').id, scheduleId: sched, from: today, to: today }, dean).ok).toBe(true);
+    expect(slotsForUser(getState(), alex, today)).toHaveLength(1);
+    expect(slotsForUser(getState(), sam, today)).toHaveLength(0);
+    // A dean still sees everything.
+    expect(slotsForUser(getState(), dean, today)).toHaveLength(2);
+  });
+
+  it('only applies an assignment on the days it covers', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const sam = addRA('Sam', ['Floor 1'], dean);
+    const today = todayKey();
+    const tomorrow = addDays(today, 1);
+    actions.addAssignment({ raId: alex.id, floorId: floor('Floor 1').id, scheduleId: 'all', from: today, to: today }, dean);
+    expect(slotsForUser(getState(), sam, today)).toHaveLength(0);
+    expect(slotsForUser(getState(), sam, tomorrow)).toHaveLength(1);
+  });
+
+  it('refuses an assignment that ends before it starts', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const res = actions.addAssignment({ raId: alex.id, floorId: floor('Floor 1').id, scheduleId: 'all', from: addDays(todayKey(), 2), to: todayKey() }, dean);
+    expect(res.ok).toBe(false);
+  });
+
+  it('will not stack unread reminders for the same check', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const n = { toRaId: alex.id, floorId: floor('Floor 1').id, scheduleId: getState().schedules[0].id, date: todayKey() };
+    expect(actions.nudge(n, dean).ok).toBe(true);
+    expect(actions.nudge(n, dean).ok).toBe(false);
+    expect(nudgesFor(getState(), alex.id)).toHaveLength(1);
+    actions.markNudgesSeen(alex.id);
+    expect(nudgesFor(getState(), alex.id)).toHaveLength(0);
+    // Once read, a dean may chase again.
+    expect(actions.nudge(n, dean).ok).toBe(true);
+  });
+
+  it('turns a returned cover into an ordinary check, named on both sides', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const today = todayKey();
+    const sched = getState().schedules[0].id;
+    const res = actions.applyCoverResult({
+      handoffId: 'h1', scheduleId: sched, floorId: floor('Floor 1').id, date: today,
+      forRaId: alex.id, forRaName: alex.name, coveredBy: 'Jordan Miles',
+      startedAt: new Date().toISOString(), submittedAt: new Date().toISOString(),
+      entries: [{ boyId: boy('Achebe').id, statusId: status('A').id, note: 'Not signed out' }],
+    });
+    expect(res.ok).toBe(true);
+    const check = getState().checks[0];
+    expect(check.source).toBe('cover');
+    expect(check.coveredBy).toBe('Jordan Miles');
+    expect(check.raName).toBe('Alex');
+    expect(check.entries.find((e) => e.boyId === boy('Achebe').id)?.statusId).toBe(status('A').id);
+    // Everyone else on the floor is still accounted for, at the default.
+    expect(check.entries).toHaveLength(3);
+    expect(check.entries.find((e) => e.boyId === boy('Bell').id)?.statusId).toBe(status('P').id);
+  });
+
+  it('lets the RA’s own check win over a cover that arrives late', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const today = todayKey();
+    const sched = getState().schedules[0].id;
+    const mine = actions.startCheck(sched, floor('Floor 1').id, today, alex);
+    actions.submitCheck(mine, alex);
+    const res = actions.applyCoverResult({
+      handoffId: 'h2', scheduleId: sched, floorId: floor('Floor 1').id, date: today,
+      forRaId: alex.id, forRaName: alex.name, coveredBy: 'Jordan Miles',
+      startedAt: new Date().toISOString(), submittedAt: new Date().toISOString(),
+      entries: [{ boyId: boy('Achebe').id, statusId: status('A').id }],
+    });
+    expect(res.ok).toBe(false);
+    expect(getState().checks).toHaveLength(1);
+    expect(getState().checks[0].source).toBe('app');
+  });
+
+  it('ignores a status the dorm does not have rather than trusting the sender', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    actions.applyCoverResult({
+      handoffId: 'h3', scheduleId: getState().schedules[0].id, floorId: floor('Floor 1').id, date: todayKey(),
+      forRaId: alex.id, forRaName: alex.name, coveredBy: 'Jordan Miles',
+      startedAt: new Date().toISOString(), submittedAt: new Date().toISOString(),
+      entries: [{ boyId: boy('Achebe').id, statusId: 'made-up-status' }],
+    });
+    expect(getState().checks[0].entries.find((e) => e.boyId === boy('Achebe').id)?.statusId).toBe(status('P').id);
   });
 });

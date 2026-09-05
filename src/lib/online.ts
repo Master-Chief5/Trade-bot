@@ -10,6 +10,7 @@ import { createClient, type RealtimeChannel, type Session, type SupabaseClient }
 import { del, get, set } from 'idb-keyval';
 import { useSyncExternalStore } from 'react';
 import { decryptJson, encryptJson, fingerprint, generateDeviceKeyPair, generateDormKey, unwrapDormKey, wrapDormKey } from './crypto';
+import { HANDOFF_AAD, listHandoffs, listResults, unwrapHandoffKey, type HandoffClaim, type HandoffResult } from './handoff';
 import { initialState } from './defaults';
 import { actions, applyEvent, getState, rebase, replaceState, setRecorder, type StoreEvent } from './store';
 import type { AppState, Role, StaffUser } from './types';
@@ -42,6 +43,8 @@ type KeyStore = Record<string, Record<string, HeldKey>>;
 interface SyncMeta {
   lastSeq: number;
   lastSnapshotSeq: number;
+  /** Highest handoff result already folded in, so a cover is never applied twice. */
+  lastResultId?: number;
   pending: { event: StoreEvent; sent: boolean }[];
   confirmedState: AppState | null;
 }
@@ -299,6 +302,17 @@ async function ensureKey(dormId: string, version: number, needExtractable: boole
     console.warn('Could not open the dorm key', err);
     return Boolean(existing);
   }
+}
+
+/**
+ * The dorm key at a given version, for sealing a handoff's one-time key. Never handed out
+ * extractable: a handoff wraps with it, it is never re-exported.
+ */
+export async function dormKeyForHandoff(version: number): Promise<CryptoKey | null> {
+  const dormId = online.dorm?.id;
+  if (!dormId) return null;
+  if (!(await ensureKey(dormId, version, false))) return null;
+  return held(dormId, version)?.key ?? null;
 }
 
 function aad(dormId: string, version: number): string {
@@ -662,6 +676,7 @@ export async function syncNow(): Promise<void> {
   try {
     await push(dormId);
     await pull(dormId);
+    await collectCovers(dormId);
     setSync({ lastSyncAt: new Date().toISOString(), error: null });
     await maybeSnapshot(dormId);
     if (online.membership?.role === 'dean') await refreshPendingCount();
@@ -747,6 +762,63 @@ async function pull(dormId: string) {
     await saveMeta();
     if (blocked || rows.length < 500) return;
   }
+}
+
+/**
+ * Fold in checks handed back by people covering. Their results are sealed under a one-time key
+ * that only reaches this device wrapped under the dorm key, so the relay never held anything
+ * readable. Applying a result is an ordinary action, so it syncs on to every other phone.
+ */
+async function collectCovers(dormId: string) {
+  const meta = metaStore[dormId];
+  if (!meta) return;
+  const version = online.dorm?.keyVersion;
+  if (version === undefined) return;
+  const rows = await listResults(dormId, meta.lastResultId ?? 0);
+  if (!rows.length) return;
+
+  const handoffs = await listHandoffs(dormId);
+  const byId = new Map(handoffs.map((h) => [h.id, h]));
+  const keyCache = new Map<string, CryptoKey>();
+  let applied = false;
+
+  for (const row of rows) {
+    const h = byId.get(row.handoffId);
+    if (!h) {
+      // The handoff is gone; there is nothing left to read it with. Move past it.
+      meta.lastResultId = row.id;
+      continue;
+    }
+    try {
+      let k = keyCache.get(h.id);
+      if (!k) {
+        if (!(await ensureKey(dormId, h.keyVersion, false))) return;
+        k = await unwrapHandoffKey(held(dormId, h.keyVersion)!.key, h.wrappedKey);
+        keyCache.set(h.id, k);
+      }
+      const result = await decryptJson<HandoffResult>(k, row.payload, HANDOFF_AAD);
+      const claim = h.claim ? await decryptJson<HandoffClaim>(k, h.claim, HANDOFF_AAD) : null;
+      const who = claim?.name ?? result.by;
+      const res = actions.applyCoverResult({
+        handoffId: h.id,
+        scheduleId: result.scheduleId,
+        floorId: result.floorId,
+        date: result.date,
+        forRaId: result.forRaId,
+        forRaName: result.forRaName,
+        coveredBy: who,
+        startedAt: result.startedAt,
+        submittedAt: result.submittedAt,
+        entries: result.entries.map((e) => ({ boyId: e.boyId, statusId: e.statusId, note: e.note })),
+      });
+      if (res.ok) applied = true;
+    } catch (err) {
+      console.warn('Could not read a returned check', err);
+    }
+    meta.lastResultId = row.id;
+  }
+  await saveMeta();
+  if (applied) void syncNow();
 }
 
 async function maybeSnapshot(dormId: string) {

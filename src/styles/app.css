@@ -378,3 +378,14 @@ table.plain th { font-size: 12px; text-transform: uppercase; letter-spacing: .06
   background: #fff;
   padding: 2px 6px;
 }
+
+/* Handover code. White plate regardless of theme so a camera reads it in the dark. */
+.qr {
+  width: 260px;
+  height: 260px;
+  max-width: 100%;
+  background: #fff;
+  border-radius: 12px;
+  padding: 10px;
+  box-sizing: content-box;
+}

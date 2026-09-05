@@ -1,4 +1,4 @@
-import type { AppState, Boy, Check, CheckSchedule, Floor, Leave, Room, SheetTemplate, StaffUser, StatusType } from './types';
+import type { AppState, Assignment, Boy, Check, CheckSchedule, Floor, Leave, Room, SheetTemplate, StaffUser, StatusType } from './types';
 import { dateInRange, hoursSince, minutesOfDay, parseKey, weekdayOf } from './dates';
 import { can, visibleFloorIds } from './permissions';
 
@@ -266,8 +266,42 @@ export function canReopenCheck(state: Pick<AppState, 'headRAPermissions' | 'floo
   return can(user, 'reopenCheck', state.headRAPermissions) && hoursSince(check.submittedAt) <= 24;
 }
 
+/** Assignments in force for one check on one date, most recently made first. */
+export function assignmentsFor(state: Pick<AppState, 'assignments'>, scheduleId: string, floorId: string, date: string): Assignment[] {
+  return state.assignments
+    .filter((a) => a.floorId === floorId && (a.scheduleId === 'all' || a.scheduleId === scheduleId) && dateInRange(date, a.from, a.to))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** Who a dean has put on this check, if anyone. A named check belongs to them alone. */
+export function assigneeIds(state: Pick<AppState, 'assignments'>, scheduleId: string, floorId: string, date: string): string[] {
+  return [...new Set(assignmentsFor(state, scheduleId, floorId, date).map((a) => a.raId))];
+}
+
+/**
+ * The checks this person is expected to do. A dean's assignment is the whole answer where one
+ * exists — being on the floor is not enough to claim a check someone else was named for — and
+ * where none exists it falls back to floor membership.
+ */
 export function slotsForUser(state: AppState, user: StaffUser, date: string, now: Date = new Date()): Slot[] {
-  return slotsForDate(state, date, now, visibleFloorIds(state, user));
+  const seeAll = can(user, 'viewAllFloors', state.headRAPermissions);
+  return slotsForDate(state, date, now, visibleFloorIds(state, user)).filter((slot) => {
+    const named = assigneeIds(state, slot.schedule.id, slot.floor.id, date);
+    if (named.length === 0) return true;
+    return named.includes(user.id) || seeAll;
+  });
+}
+
+/** Slots on a date that a dean has named someone for, with who. */
+export function assignedSlots(state: AppState, date: string, now: Date = new Date()): { slot: Slot; raIds: string[] }[] {
+  return slotsForDate(state, date, now)
+    .map((slot) => ({ slot, raIds: assigneeIds(state, slot.schedule.id, slot.floor.id, date) }))
+    .filter((x) => x.raIds.length > 0);
+}
+
+/** Unread reminders for one person. */
+export function nudgesFor(state: Pick<AppState, 'nudges'>, raId: string) {
+  return state.nudges.filter((n) => n.toRaId === raId && !n.seenAt).sort((a, b) => b.at.localeCompare(a.at));
 }
 
 /** The checks that were due on a floor that day — what an RA has to finish before signing off. */

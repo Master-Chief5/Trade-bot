@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { absentOn, canDoCheckOnFloor, flaggedBoys, leaveCovering, schedulesForDate, slotsForDate, tally, type Slot } from '../lib/checks';
+import { absentOn, assigneeIds, canDoCheckOnFloor, flaggedBoys, leaveCovering, schedulesForDate, slotsForDate, tally, type Slot } from '../lib/checks';
 import { formatClock, formatDateLong, formatTime12, todayKey } from '../lib/dates';
 import { can, printableFloorIds } from '../lib/permissions';
 import { filledSheet, openPdf, safeName } from '../lib/pdf';
@@ -84,15 +84,36 @@ export function DeanTonight({ user }: { user: StaffUser }) {
                             ? `Not submitted · past ${formatTime12(schedule.time)} + ${schedule.deadlineMinutes} min`
                             : 'Not started';
                     const mayDo = canDoCheckOnFloor(user, slot.floor.id);
+                    // Who owes this check: whoever was named for it, else everyone on the floor.
+                    const named = assigneeIds(state, schedule.id, slot.floor.id, today);
+                    const owed = named.length
+                      ? named
+                      : state.staff.filter((st) => st.active && st.role !== 'dean' && st.floorIds.includes(slot.floor.id)).map((st) => st.id);
+                    const late = slot.status !== 'submitted' && slot.pastDeadline && owed.length > 0;
+                    const owedNames = owed.map((idv) => state.staff.find((st) => st.id === idv)?.name).filter(Boolean).join(', ');
+                    const nudged = state.nudges.some((n) => !n.seenAt && n.scheduleId === schedule.id && n.floorId === slot.floor.id && n.date === today);
+                    const ping = () => {
+                      let sent = 0;
+                      owed.forEach((toRaId) => {
+                        if (actions.nudge({ toRaId, floorId: slot.floor.id, scheduleId: schedule.id, date: today }, user).ok) sent += 1;
+                      });
+                      toast(sent ? `Reminded ${owedNames}` : 'They already have a reminder waiting.', sent ? 'ok' : 'error');
+                    };
                     return (
                       <ListRow
                         key={slot.floor.id}
                         lead={<span className={`status-circle ${circle}`}><Icon name={icon} size={16} stroke={2.2} /></span>}
                         title={slot.floor.name}
-                        subtitle={detail}
+                        subtitle={named.length ? `${detail} · ${owedNames}` : detail}
                         to={slot.check ? `/check/${slot.check.id}` : undefined}
                         onClick={!slot.check && mayDo ? () => open(slot) : undefined}
-                        trail={t ? <Counts codes={t.byCode} present={t.present} absent={t.absent} excused={t.excused} /> : mayDo ? <span className="tag">{slot.status === 'in-progress' ? 'Continue' : 'Start'}</span> : slot.check ? <span className="tag neutral">View</span> : undefined}
+                        trail={
+                          t ? <Counts codes={t.byCode} present={t.present} absent={t.absent} excused={t.excused} />
+                            : late ? <Button variant="outline" size="sm" icon="bell" disabled={nudged} onClick={(e) => { e.preventDefault(); e.stopPropagation(); ping(); }}>{nudged ? 'Reminded' : 'Remind'}</Button>
+                            : mayDo ? <span className="tag">{slot.status === 'in-progress' ? 'Continue' : 'Start'}</span>
+                            : slot.check ? <span className="tag neutral">View</span>
+                            : undefined
+                        }
                         chevron={!!slot.check}
                       />
                     );

@@ -5,7 +5,7 @@ import { can, roleLabel } from '../lib/permissions';
 import { notificationPermission, requestNotificationPermission, useRemindersEnabled } from '../lib/reminders';
 import { useTheme } from '../lib/theme';
 import { onlineAvailable, signOutAndWipe, useOnline } from '../lib/online';
-import { formatDateTime } from '../lib/dates';
+import { formatDateTime, todayKey } from '../lib/dates';
 import type { StaffUser } from '../lib/types';
 import { Button } from '../ui/Button';
 import { Toggle } from '../ui/Form';
@@ -50,6 +50,9 @@ export function Settings({ user }: { user: StaffUser }) {
             {isDean && <ListRow icon="check" to="/settings/status-types" title="Status types" subtitle={state.statusTypes.map((s) => s.code).join(' · ')} chevron />}
             {isDean && <ListRow icon="clock" to="/settings/schedules" title="Check schedules" subtitle={`${state.schedules.filter((s) => s.active).length} active`} chevron />}
             {isDean && <ListRow icon="sheet" to="/settings/sheets" title="Check sheets" subtitle={state.sheetTemplates.map((t) => t.name).join(' · ') || 'None yet'} chevron />}
+            {(isDean || can(user, 'assignRAs', perms) || can(user, 'manageRAs', perms)) && (
+              <ListRow icon="user" to="/settings/assignments" title="Who does what" subtitle={`${state.assignments.filter((a) => a.to >= todayKey()).length} assigned`} chevron />
+            )}
             {(isDean || can(user, 'manageRAs', perms) || can(user, 'assignRAs', perms)) && <ListRow icon="boys" to="/settings/staff" title="Staff" subtitle={`${state.staff.filter((s) => s.active).length} active`} chevron />}
             {isDean && <ListRow icon="user" to="/settings/head-ra" title="Head RA permissions" subtitle={state.settings.headRAEnabled ? `${Object.values(perms).filter(Boolean).length} of ${Object.keys(perms).length} switches on` : 'No head RA this year'} chevron />}
             {isDean && <ListRow icon="calendar" to="/settings/leave" title="Leave board" subtitle="Sign boys out ahead of time" chevron />}

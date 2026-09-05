@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { checksDueOn, dayComplete, signatureFor, slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
+import { checksDueOn, dayComplete, nudgesFor, signatureFor, slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
 import { addDays, formatDate, formatDateLong, formatTime12, formatClock, todayKey, DAY_NAMES_LONG, weekdayOf } from '../lib/dates';
 import { can, visibleFloorIds } from '../lib/permissions';
 import { useRemindersEnabled } from '../lib/reminders';
@@ -41,6 +41,13 @@ export function RAHome({ user }: { user: StaffUser }) {
   const weekAgo = addDays(today, -7);
   const recent = submittedChecksDesc(state).filter((c) => floorIds.includes(c.floorId) && c.date >= weekAgo && c.date <= today).slice(0, 8);
 
+  // Marked seen a moment after the screen settles, so the banner is actually read before it goes.
+  useEffect(() => {
+    if (!nudgesFor(state, user.id).length) return;
+    const t = setTimeout(() => actions.markNudgesSeen(user.id), 4000);
+    return () => clearTimeout(t);
+  }, [state, user.id]);
+
   const start = (slot: Slot) => {
     const id = actions.startCheck(slot.schedule.id, slot.floor.id, slot.date, user);
     navigate(`/check/${id}`);
@@ -62,6 +69,13 @@ export function RAHome({ user }: { user: StaffUser }) {
       {floorIds.length === 0 && (
         <Banner kind="warn">You are not assigned to a floor yet. Ask a dean to add you to one under Staff.</Banner>
       )}
+      {nudgesFor(state, user.id).map((n) => (
+        <Banner key={n.id} kind="warn" icon="bell">
+          <strong>{n.byName}</strong> is waiting on {state.schedules.find((s) => s.id === n.scheduleId)?.name.toLowerCase() ?? 'a check'} for{' '}
+          {state.floors.find((f) => f.id === n.floorId)?.name ?? 'your floor'}{n.date !== today ? ` on ${formatDate(n.date)}` : ''}.
+          {n.message ? ` ${n.message}` : ''}
+        </Banner>
+      ))}
       {escalations.map((s) => (
         <Banner key={s.schedule.id + s.floor.id} kind="danger" icon="clock">
           <strong>{s.floor.name}</strong> has not submitted {s.schedule.name.toLowerCase()} and it is past the deadline.
@@ -127,6 +141,7 @@ export function RAHome({ user }: { user: StaffUser }) {
         </>
       )}
       <Card>
+        <ListRow icon="grip" to="/handoff" title="Hand a check over" subtitle="Show someone a code so they can cover for you" chevron />
         <ListRow icon="print" to="/print" title="Print a blank sheet" subtitle="Your floors, current roster, empty boxes" chevron />
       </Card>
     </>

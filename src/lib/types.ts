@@ -101,6 +101,55 @@ export interface SheetTemplate {
   sortOrder: number;
 }
 
+/**
+ * A dean putting one person on one check, rather than leaving it to whoever covers the floor.
+ * An assignment wins over floor membership for the dates it covers.
+ */
+export interface Assignment {
+  id: string;
+  /** A specific check, or 'all' for every check that day. */
+  scheduleId: string | 'all';
+  floorId: string;
+  raId: string;
+  /** "YYYY-MM-DD" local, inclusive. */
+  from: string;
+  to: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** A dean poking someone whose check is late. Seen on that person's home screen. */
+export interface Nudge {
+  id: string;
+  toRaId: string;
+  floorId: string;
+  scheduleId: string;
+  date: string;
+  message?: string;
+  byId: string;
+  byName: string;
+  at: string;
+  seenAt?: string;
+}
+
+/**
+ * A record that someone outside the dorm covered a check, written when their result comes
+ * back through the handoff. Kept so a dean can always see who actually walked the floor.
+ */
+export interface Cover {
+  id: string;
+  handoffId: string;
+  /** Typed in by the person covering; they are not in the dorm, so this is all we have. */
+  name: string;
+  forRaId: string;
+  forRaName: string;
+  floorId: string;
+  from: string;
+  to: string;
+  claimedAt: string;
+  createdBy: string;
+}
+
 /** An RA's drawn signature for one day on one floor, printed onto that day's line. */
 export interface DaySignature {
   id: string;
@@ -136,7 +185,9 @@ export interface Check {
   raName: string;
   startedAt: string;
   submittedAt: string | null;
-  source: 'app' | 'paper';
+  source: 'app' | 'paper' | 'cover';
+  /** Set when someone outside the dorm covered this check through a handoff. */
+  coveredBy?: string;
   entries: CheckEntry[];
   reopenedBy?: string;
 }
@@ -204,6 +255,9 @@ export interface AppState {
   statusTypes: StatusType[];
   schedules: CheckSchedule[];
   sheetTemplates: SheetTemplate[];
+  assignments: Assignment[];
+  nudges: Nudge[];
+  covers: Cover[];
   checks: Check[];
   signatures: DaySignature[];
   leaves: Leave[];

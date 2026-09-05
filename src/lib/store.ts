@@ -2,7 +2,7 @@ import { produce, type Draft } from 'immer';
 import { get, set } from 'idb-keyval';
 import { useSyncExternalStore } from 'react';
 import type {
-  AppState, Boy, CheckSchedule, DaySignature, Floor, HeadRAPermissions, Leave, Room, RoomType, SheetTemplate, StaffUser, StatusType,
+  AppState, Assignment, Boy, CheckSchedule, Cover, DaySignature, Floor, HeadRAPermissions, Leave, Nudge, Room, RoomType, SheetTemplate, StaffUser, StatusType,
 } from './types';
 import { DEFAULT_HEAD_RA_PERMISSIONS, DEFAULT_SCHEDULES, DEFAULT_STATUS_TYPES, initialState } from './defaults';
 import { uid } from './ids';
@@ -99,6 +99,9 @@ function migrate(s: AppState): AppState {
     floors: (s.floors ?? []).map((f) => ({ ...f, layout: f.layout ?? 'corridor' })),
     sheetTemplates: s.sheetTemplates ?? [],
     signatures: s.signatures ?? [],
+    assignments: s.assignments ?? [],
+    nudges: s.nudges ?? [],
+    covers: s.covers ?? [],
   };
 }
 
@@ -479,6 +482,99 @@ export const rawActions = {
       if (s) Object.assign(s, patch);
     });
   },
+  /** A dean naming who does a check, for a date range. Overrides plain floor membership. */
+  addAssignment(input: Omit<Assignment, 'id' | 'createdBy' | 'createdAt'>, actor: StaffUser): Result {
+    if (input.to < input.from) return { ok: false, error: 'The end date is before the start.' };
+    if (!isDateKey(input.from) || !isDateKey(input.to)) return { ok: false, error: 'Enter both dates.' };
+    const state = getState();
+    const ra = state.staff.find((s) => s.id === input.raId && s.active);
+    if (!ra) return { ok: false, error: 'That person is not on the staff list.' };
+    if (!state.floors.some((f) => f.id === input.floorId)) return { ok: false, error: 'That floor is gone.' };
+    update((d) => {
+      d.assignments.push({ ...input, id: uid('as'), createdBy: actor.id, createdAt: nowIso() });
+      const what = input.scheduleId === 'all' ? 'every check' : d.schedules.find((x) => x.id === input.scheduleId)?.name ?? 'a check';
+      log(d, actor, 'assignment.add', `${ra.name} · ${what} · ${d.floors.find((f) => f.id === input.floorId)?.name} · ${input.from} to ${input.to}`);
+    });
+    return { ok: true };
+  },
+  deleteAssignment(id: string, actor: StaffUser) {
+    update((d) => {
+      const a = d.assignments.find((x) => x.id === id);
+      if (!a) return;
+      d.assignments = d.assignments.filter((x) => x.id !== id);
+      log(d, actor, 'assignment.remove', `${d.staff.find((s) => s.id === a.raId)?.name ?? 'Someone'} · ${a.from} to ${a.to}`);
+    });
+  },
+
+  /** A dean poking whoever owes a check. Lands on that person's home screen. */
+  nudge(input: Omit<Nudge, 'id' | 'byId' | 'byName' | 'at' | 'seenAt'>, actor: StaffUser): Result {
+    const state = getState();
+    if (!state.staff.some((s) => s.id === input.toRaId && s.active)) return { ok: false, error: 'That person is not on the staff list.' };
+    // One open nudge per person per check per day: a dean tapping twice should not spam them.
+    if (state.nudges.some((n) => !n.seenAt && n.toRaId === input.toRaId && n.scheduleId === input.scheduleId && n.floorId === input.floorId && n.date === input.date)) {
+      return { ok: false, error: 'They already have an unread reminder for this check.' };
+    }
+    update((d) => {
+      d.nudges.push({ ...input, id: uid('ndg'), byId: actor.id, byName: actor.name, at: nowIso() });
+      log(d, actor, 'nudge', `${d.staff.find((s) => s.id === input.toRaId)?.name ?? 'Someone'} · ${input.date}`);
+    });
+    return { ok: true };
+  },
+  markNudgesSeen(raId: string) {
+    update((d) => { d.nudges.forEach((n) => { if (n.toRaId === raId && !n.seenAt) n.seenAt = nowIso(); }); });
+  },
+
+  /**
+   * A check handed back by someone covering. It becomes an ordinary check attributed to the RA
+   * who arranged the cover, with the coverer's name on it, so the sheet and the history always
+   * show who actually walked the floor. Ignored if that check already exists — the RA may have
+   * done it themselves after all, and their own work wins.
+   */
+  applyCoverResult(input: {
+    handoffId: string; scheduleId: string; floorId: string; date: string;
+    forRaId: string; forRaName: string; coveredBy: string;
+    startedAt: string; submittedAt: string; entries: { boyId: string; statusId: string; note?: string }[];
+  }): Result {
+    const state = getState();
+    if (findCheck(state, input.scheduleId, input.floorId, input.date)) return { ok: false, error: 'That check is already done.' };
+    const schedule = state.schedules.find((s) => s.id === input.scheduleId);
+    const floor = state.floors.find((f) => f.id === input.floorId);
+    if (!schedule || !floor) return { ok: false, error: 'That check no longer exists.' };
+    const byBoy = new Map(input.entries.map((e) => [e.boyId, e]));
+    update((d) => {
+      const entries = boysOnFloor(d, input.floorId).map(({ boy, room }) => {
+        const got = byBoy.get(boy.id);
+        // A boy who arrived after the handoff was made is not in the returned result; he falls
+        // back to the default rather than silently inheriting someone else's mark.
+        const statusId = got && d.statusTypes.some((s) => s.id === got.statusId) ? got.statusId : defaultStatusFor(d, boy.id, input.date).id;
+        return { boyId: boy.id, name: boyName(boy), grade: boy.grade, roomNumber: room?.number ?? '', statusId, note: got?.note };
+      });
+      d.checks.push({
+        id: uid('c'), scheduleId: input.scheduleId, scheduleName: schedule.name, time: schedule.time,
+        floorId: input.floorId, floorName: floor.name, date: input.date,
+        raId: input.forRaId, raName: input.forRaName, startedAt: input.startedAt, submittedAt: input.submittedAt,
+        source: 'cover', coveredBy: input.coveredBy, entries,
+      });
+      d.audit.unshift({
+        id: uid('a'), at: nowIso(), userId: input.forRaId, userName: input.forRaName,
+        action: 'check.cover', detail: `${input.coveredBy} covered ${schedule.name} · ${floor.name} · ${input.date}`,
+      });
+    });
+    return { ok: true };
+  },
+
+  /** Recorded when a handoff is claimed, so a dean can see who is walking the floor tonight. */
+  recordCover(input: Omit<Cover, 'id'>) {
+    update((d) => {
+      if (d.covers.some((c) => c.handoffId === input.handoffId)) return;
+      d.covers.push({ ...input, id: uid('cov') });
+      d.audit.unshift({
+        id: uid('a'), at: nowIso(), userId: input.createdBy, userName: input.forRaName,
+        action: 'cover.claimed', detail: `${input.name} is covering ${d.floors.find((f) => f.id === input.floorId)?.name ?? ''} · ${input.from} to ${input.to}`,
+      });
+    });
+  },
+
   addSheetTemplate(input: Omit<SheetTemplate, 'id' | 'sortOrder'>): string {
     const id = uid('sht');
     update((d) => { d.sheetTemplates.push({ ...input, id, sortOrder: d.sheetTemplates.length }); });

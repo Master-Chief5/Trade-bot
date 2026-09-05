@@ -30,6 +30,9 @@ import { SyncSettings } from './screens/settings/SyncSettings';
 import { StatusTypes } from './screens/settings/StatusTypes';
 import { Schedules } from './screens/settings/Schedules';
 import { Sheets } from './screens/settings/Sheets';
+import { Handoff } from './screens/Handoff';
+import { Assignments } from './screens/settings/Assignments';
+import { Cover } from './screens/Cover';
 import { Staff } from './screens/settings/Staff';
 import { StaffEdit } from './screens/settings/StaffEdit';
 import { HeadRA } from './screens/settings/HeadRA';
@@ -61,10 +64,21 @@ function Gate() {
   const user = useCurrentUser();
   const sessionId = useSessionUserId();
   const online = useOnline();
+  const location = useLocation();
   const account = online.session;
   useEffect(() => {
     if (!account && sessionId && !user) signOut();
   }, [account, sessionId, user]);
+
+  // Someone covering a check scanned a code. They have no account and no dorm on this device,
+  // so this route sits outside every gate below — and shows them nothing but that one floor.
+  if (location.pathname.startsWith('/cover/')) {
+    return (
+      <Routes>
+        <Route path="/cover/:id" element={<Cover />} />
+      </Routes>
+    );
+  }
 
   if (account) {
     // Online mode: the account decides where you land.
@@ -146,6 +160,8 @@ function Shell({ user }: { user: StaffUser }) {
           <Route path="settings/status-types" element={<Require user={user} cap="manageStatusTypes"><StatusTypes /></Require>} />
           <Route path="settings/schedules" element={<Require user={user} cap="manageSchedules"><Schedules /></Require>} />
           <Route path="settings/sheets" element={<Require user={user} cap="manageSchedules"><Sheets /></Require>} />
+          <Route path="handoff" element={<Handoff user={user} />} />
+          <Route path="settings/assignments" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><Assignments user={user} /></Require>} />
           <Route path="settings/staff" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><Staff user={user} /></Require>} />
           <Route path="settings/staff/new" element={<Require user={user} cap="manageRAs"><StaffEdit user={user} /></Require>} />
           <Route path="settings/staff/:id" element={<Require user={user} cap={['manageRAs', 'assignRAs']}><StaffEdit user={user} /></Require>} />

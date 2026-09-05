@@ -126,6 +126,8 @@ Labels: **Must** for the first version the deans use nightly. **Should** for the
 ### Printing and PDF (Must)
 
 - **The weekly check sheet**, in the school's own layout: the RA's name in the corner, rooms down the side with one row per bed, square mark boxes, a column block per day and one column per check inside it — W for worship, SH for study hall, RC for room check. A Total Boys row, and a signature and date line per day carrying the signature the RA drew when they signed off.
+- **Assigned checks and reminders.** A dean can name who does a check rather than leaving it to the floor, and chase whoever is late without leaving the app.
+- **Temporary handover.** A QR code that gives someone outside the dorm one floor for a few nights, without an account and without ever holding the dorm key.
 - **A sheet designer.** Deans build the sheets rather than accepting ours: name, which days it covers, which checks get a column and in what order, and exactly which rooms are listed. A dorm can keep several — a Sunday-to-Thursday sheet and a separate weekend one — and print whichever it needs.
 - **The same sheet blank**, roster printed and every mark empty, for when a phone is not an option.
 - **Should:** week-at-a-glance grid per floor (boys down the side, nights across, one letter per cell). Per-boy history sheet. Floor map printout with room numbers.
