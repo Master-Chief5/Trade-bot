@@ -4,6 +4,8 @@ build/
 .env
 .env.*
 !.env.example
+# Committed on purpose: build settings for the hosted app, both values public.
+!.env.production
 .DS_Store
 *.log
 dev-dist/
