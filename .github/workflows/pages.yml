@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  pages-enabled:
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.probe.outputs.enabled }}
@@ -41,9 +41,9 @@ jobs:
             echo "::notice title=GitHub Pages is off::Turn it on under Settings → Pages → Source: GitHub Actions, then push again to publish."
           fi
 
-  build:
-    needs: check
-    if: needs.check.outputs.enabled == 'true'
+  pages-build:
+    needs: pages-enabled
+    if: needs.pages-enabled.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,8 +64,8 @@ jobs:
         with:
           path: dist
 
-  deploy:
-    needs: build
+  pages-deploy:
+    needs: pages-build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
