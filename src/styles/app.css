@@ -357,6 +357,9 @@ table.plain th { font-size: 12px; text-transform: uppercase; letter-spacing: .06
 .splash { min-height: 100dvh; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 14.5px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* A native date field has a wide minimum, which on a phone pushed the second column past the card. */
+.grid-2 > * { min-width: 0; }
+.input[type="date"] { min-width: 0; -webkit-appearance: none; appearance: none; }
 .audit-row { padding: 10px 14px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
 .audit-row:last-child { border-bottom: none; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

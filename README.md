@@ -38,21 +38,26 @@ The goal is that losing the server loses nothing, because the server never held 
 - **A device never silently skips a change it cannot read.** If decryption fails, sync stops and says so rather than moving past it, because a skipped change means two phones printing different sheets.
 - **Removing someone rotates the dorm key and the join code.** Their phone keeps whatever it already downloaded — nothing can reach into a phone and erase it — but it cannot read anything from that moment on. The database refuses writes under a superseded key, so a device that missed the rotation cannot keep publishing in a key the removed member holds.
 - **Deans approve every phone, not just every person.** Activating someone lists their phones with a 64-bit fingerprint each, and the dean ticks the ones whose code matches what the RA reads out. A phone left unticked joins with no access until it is approved by name. So a stolen password alone does not read the dorm: the attacker's own phone is a phone the dean never confirmed.
+- **Handing a check to an outsider does not open the dorm.** The RA's phone seals one floor's roster for the chosen nights under a fresh one-time key. That key travels in the QR code's URL fragment, which browsers never send to a server, and it is also sealed under the dorm key so a dean's phone can read what comes back. The person covering reaches three database functions and nothing else: claim the code (once, within a minute), re-open it, and hand back a check. Their access token is stored only as a hash.
+- **A returned check is held to the handover it came from.** The coverer holds the one-time key, so a result is only as honest as its sender. Every result is judged against what the RA sealed — which floor, which checks, which nights — and against the dates the relay recorded; anything outside that is dropped, and the RA's own name comes from the sealed scope, never from the result.
+- **A printed recovery code, for the day every phone is gone.** A dean can make one under Settings → Online sync: 160 random bits shown once, in eight groups of four, on a page meant for a locked drawer. The dorm key is sealed under a key derived from the code (PBKDF2-SHA256); the server keeps the seal and its salt, which open nothing without the paper. A dean signing in on a brand-new phone types the code in and the phone holds the dorm key like any approved one. Removing someone changes the dorm key; a phone that has held the code re-seals the new key under it on the spot, and if none was there the app says the printout is out of date until a dean prints a new one.
 - **Websockets are a bonus, not a requirement.** Everything also polls, because school networks block sockets.
 
 To point the app at your own project, copy `.env.example` to `.env` and apply `supabase/migrations/*.sql`. With no configuration the app simply runs on one device.
 
 ### Know this before you rely on it
 
-**If every device holding the dorm key is lost, the dorm cannot be recovered.** Not by the school, not by the hosting provider, not by anyone. That is the other side of the server being unable to read it. Two protections, and you want both:
+**If every device holding the dorm key is lost and there is no recovery code, the dorm cannot be recovered.** Not by the school, not by the hosting provider, not by anyone. That is the other side of the server being unable to read it. Three protections, in the order they matter:
 
+- Print a recovery code from Settings → Online sync and lock the page away. The dean's home screen nags until one exists, and again if the key changes after it was printed.
 - Keep at least two dean devices signed in, so one can approve a replacement for the other.
 - Export a backup from Settings → Backup now and then. It writes a plain file to that device, which is the only copy anybody can read without a key.
+
+A recovery code opens everything, so it is exactly as sensitive as the dorm itself. Do not photograph it or email it. If it is lost or seen, make a new one; that cancels the old page.
 
 ## What it does not do yet
 
 - **Reminders while the phone is locked.** In-app reminders fire while the app is open. Locked-phone push needs a server job with VAPID keys.
-- **A printed recovery code**, so a lone dean who loses their only phone can still get back in.
 - **Password recovery without email.** Reset goes through the email on the account.
 - **Leaked-password checking** is available in the hosting project's auth settings and is worth turning on before real use.
 

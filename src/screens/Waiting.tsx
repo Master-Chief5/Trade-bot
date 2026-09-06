@@ -58,7 +58,7 @@ export function Waiting({ reason }: { reason: 'pending' | 'device' | 'syncing' |
               autoCorrect="off"
               spellCheck={false}
               inputMode="text"
-              placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+              placeholder="From the printed sheet"
               onChange={(e) => setCode(e.target.value)}
               help="The 32 characters on the printed sheet. Spaces, dashes and capitals do not matter."
             />
