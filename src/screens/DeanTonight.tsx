@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { absentOn, assigneeIds, canDoCheckOnFloor, flaggedBoys, leaveCovering, schedulesForDate, slotsForDate, tally, type Slot } from '../lib/checks';
+import { absentOn, assigneeIds, canDoCheckOnFloor, flaggedBoys, leaveCovering, schedulesForDate, slotsForDate, sourceNote, tally, type Slot } from '../lib/checks';
 import { formatClock, formatDateLong, formatTime12, todayKey } from '../lib/dates';
 import { can, printableFloorIds } from '../lib/permissions';
 import { filledSheet, openPdf, safeName } from '../lib/pdf';
@@ -77,7 +77,7 @@ export function DeanTonight({ user }: { user: StaffUser }) {
                     const icon = slot.status === 'submitted' ? 'check' : slot.pastDeadline ? 'alert' : slot.status === 'in-progress' ? 'clock' : 'minus';
                     const detail =
                       slot.status === 'submitted' && slot.check
-                        ? `${formatClock(slot.check.submittedAt!)} · ${slot.check.raName}${slot.check.source === 'paper' ? ' · from paper' : ''}`
+                        ? `${formatClock(slot.check.submittedAt!)} · ${slot.check.raName}${sourceNote(slot.check) ? ` · ${sourceNote(slot.check)}` : ''}`
                         : slot.status === 'in-progress' && slot.check
                           ? `In progress · ${slot.check.raName}`
                           : slot.pastDeadline

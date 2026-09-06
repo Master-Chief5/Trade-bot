@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { actions, getState } from '../src/lib/store';
-import { canEditCheck, canReopenCheck, consecutiveAbsences, dayComplete, flaggedBoys, nudgesFor, roomStates, signatureFor, slotsForDate, slotsForUser, tally, templatePeriods, templateRooms } from '../src/lib/checks';
+import { canEditCheck, canReopenCheck, consecutiveAbsences, dayComplete, flaggedBoys, nudgesFor, roomStates, signatureFor, slotsForDate, sourceNote, slotsForUser, tally, templatePeriods, templateRooms } from '../src/lib/checks';
 import { parseRoster } from '../src/lib/roster';
 import { addDays, todayKey, weekStartSunday } from '../src/lib/dates';
 import { addRA, boy, floor, setupDorm, singleSchedule, status } from './helpers';
@@ -445,5 +445,39 @@ describe('assignments, reminders and covers', () => {
       entries: [{ boyId: boy('Achebe').id, statusId: 'made-up-status' }],
     });
     expect(getState().checks[0].entries.find((e) => e.boyId === boy('Achebe').id)?.statusId).toBe(status('P').id);
+  });
+});
+
+describe('what rolls over with the year', () => {
+  it('archives covers and clears assignments, reminders and covers with the checks', () => {
+    const { dean } = setupDorm();
+    singleSchedule('22:00', 20);
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const today = todayKey();
+    const sched = getState().schedules[0].id;
+    actions.addAssignment({ raId: alex.id, floorId: floor('Floor 1').id, scheduleId: sched, from: today, to: today }, dean);
+    actions.nudge({ toRaId: alex.id, floorId: floor('Floor 1').id, scheduleId: sched, date: today }, dean);
+    actions.recordCover({
+      handoffId: 'h9', name: 'Jordan Miles', forRaId: alex.id, forRaName: alex.name, floorId: floor('Floor 1').id,
+      from: today, to: today, claimedAt: new Date().toISOString(), createdBy: alex.id,
+    });
+    expect(getState().assignments).toHaveLength(1);
+    expect(getState().nudges).toHaveLength(1);
+    expect(getState().covers).toHaveLength(1);
+
+    actions.archiveYear('2027–28', dean);
+
+    expect(getState().assignments).toHaveLength(0);
+    expect(getState().nudges).toHaveLength(0);
+    expect(getState().covers).toHaveLength(0);
+    expect(getState().archives[0].covers).toHaveLength(1);
+    expect(getState().archives[0].covers?.[0].name).toBe('Jordan Miles');
+  });
+
+  it('says who actually walked the floor', () => {
+    expect(sourceNote({ source: 'app' })).toBeNull();
+    expect(sourceNote({ source: 'paper' })).toBe('entered from paper');
+    expect(sourceNote({ source: 'cover', coveredBy: 'Jordan Miles' })).toBe('covered by Jordan Miles');
+    expect(sourceNote({ source: 'cover', coveredBy: '  ' })).toBe('covered by someone outside the dorm');
   });
 });

@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf';
 import autoTable, { type CellInput, type RowInput, type UserOptions } from 'jspdf-autotable';
 import type { AppState, Check, SheetTemplate, StatusType } from './types';
 import { addDays, formatClock, formatDateLong, formatDateShort, formatTime12, DAY_NAMES, DAY_NAMES_LONG } from './dates';
-import { boysOnFloor, roomOccupants, scheduleCode, sheetDays, sortedStatusTypes, statusById, tally, templatePeriods, templateRooms } from './checks';
+import { boysOnFloor, roomOccupants, scheduleCode, sheetDays, sortedStatusTypes, sourceNote, statusById, tally, templatePeriods, templateRooms } from './checks';
 
 type StateLike = Pick<AppState, 'settings' | 'statusTypes' | 'floors' | 'rooms' | 'boys' | 'checks'>;
 type SheetStateLike = StateLike & Pick<AppState, 'schedules' | 'signatures'>;
@@ -236,6 +236,17 @@ export function raSheet(state: SheetStateLike, floorId: string, sundayKey: strin
     doc.setTextColor(20);
     doc.text(`${DAY_NAMES_LONG[d]} — R.A. signature`, x, lineY + 3.4);
     doc.text(signed ? formatDateShort(signed.date) : 'Date', x + lineW + 4, lineY + 3.4);
+    // The sheet must say who actually walked the floor, so a covered night is named on its line.
+    const coverers = blank ? [] : [...new Set(
+      state.checks.filter((c) => c.floorId === floorId && c.date === dayKeys[i] && c.submittedAt && c.source === 'cover' && c.coveredBy).map((c) => c.coveredBy as string),
+    )];
+    if (coverers.length) {
+      doc.setTextColor(90);
+      doc.setFontSize(7);
+      doc.text(`covered by ${coverers.join(', ')}`, x, lineY + 7);
+      doc.setFontSize(8);
+      doc.setTextColor(20);
+    }
   });
 
   return doc;
@@ -249,7 +260,8 @@ export function filledSheet(state: StateLike, checks: Check[]): jsPDF {
     if (i > 0) doc.addPage();
     const t = tally(check, state.statusTypes);
     const submitted = check.submittedAt ? `Submitted ${formatClock(check.submittedAt)}` : 'Not submitted';
-    const source = check.source === 'paper' ? '  ·  Entered from paper' : '';
+    const note = sourceNote(check);
+    const source = note ? `  ·  ${note.charAt(0).toUpperCase()}${note.slice(1)}` : '';
     const startY = header(doc, [
       `${state.settings.dormName} · ${check.scheduleName}`,
       `${check.floorName}  ·  ${formatDateLong(check.date)}  ·  ${formatTime12(check.time)}`,

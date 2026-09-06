@@ -752,13 +752,17 @@ export const rawActions = {
       d.archives.unshift({
         id: uid('y'), label: d.settings.yearLabel, archivedAt: nowIso(),
         floors: [...d.floors], rooms: [...d.rooms], boys: [...d.boys], checks: [...d.checks], leaves: [...d.leaves],
-        statusTypes: [...d.statusTypes], moves: [...d.moves], signatures: [...d.signatures],
+        statusTypes: [...d.statusTypes], moves: [...d.moves], signatures: [...d.signatures], covers: [...d.covers],
       });
       d.boys = [];
       d.checks = [];
       d.leaves = [];
       d.moves = [];
       d.signatures = [];
+      // Who was on which check, the reminders sent, and who covered: all belong to the year that ended.
+      d.assignments = [];
+      d.nudges = [];
+      d.covers = [];
       d.staff.forEach((s) => { if (s.role !== 'dean') s.active = false; });
       d.settings.yearLabel = newYearLabel.trim() || d.settings.yearLabel;
       log(d, actor, 'year.rollover', `Archived ${d.archives[0].label}, started ${d.settings.yearLabel}`);

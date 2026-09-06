@@ -174,6 +174,13 @@ export function tallyLine(t: Tally): string {
   return t.byCode.filter((b) => b.count > 0).map((b) => `${b.count} ${b.code}`).join(' · ') || '—';
 }
 
+/** How a submitted check came in, for lists and printouts. Null for an ordinary in-app check. */
+export function sourceNote(c: Pick<Check, 'source' | 'coveredBy'>): string | null {
+  if (c.source === 'cover') return `covered by ${c.coveredBy?.trim() || 'someone outside the dorm'}`;
+  if (c.source === 'paper') return 'entered from paper';
+  return null;
+}
+
 export function submittedChecksOn(state: Pick<AppState, 'checks'>, date: string): Check[] {
   return state.checks.filter((c) => c.date === date && c.submittedAt);
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { checksDueOn, dayComplete, nudgesFor, signatureFor, slotsForDate, slotsForUser, submittedChecksDesc, tally, type Slot } from '../lib/checks';
+import { checksDueOn, dayComplete, nudgesFor, signatureFor, slotsForDate, slotsForUser, sourceNote, submittedChecksDesc, tally, type Slot } from '../lib/checks';
 import { addDays, formatDate, formatDateLong, formatTime12, formatClock, todayKey, DAY_NAMES_LONG, weekdayOf } from '../lib/dates';
 import { can, visibleFloorIds } from '../lib/permissions';
 import { useRemindersEnabled } from '../lib/reminders';
@@ -132,7 +132,7 @@ export function RAHome({ user }: { user: StaffUser }) {
                   key={c.id}
                   to={`/check/${c.id}`}
                   title={`${formatDate(c.date)} · ${c.scheduleName}`}
-                  subtitle={`${c.floorName} · ${c.source === 'paper' ? 'Entered from paper' : `Submitted ${formatClock(c.submittedAt!)}`}`}
+                  subtitle={`${c.floorName} · ${sourceNote(c) ? sourceNote(c)!.charAt(0).toUpperCase() + sourceNote(c)!.slice(1) : `Submitted ${formatClock(c.submittedAt!)}`}`}
                   trail={<Counts codes={t.byCode} present={t.present} absent={t.absent} excused={t.excused} />}
                 />
               );

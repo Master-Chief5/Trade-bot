@@ -232,6 +232,7 @@ export interface ArchivedYear {
   statusTypes?: StatusType[];
   moves?: Move[];
   signatures?: DaySignature[];
+  covers?: Cover[];
 }
 
 export interface Settings {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useAppState } from '../lib/store';
-import { sortedFloors, submittedChecksDesc, tally } from '../lib/checks';
+import { sortedFloors, submittedChecksDesc, tally, sourceNote } from '../lib/checks';
 import { formatClock, formatDateLong } from '../lib/dates';
 import { visibleFloorIds } from '../lib/permissions';
 import type { StaffUser } from '../lib/types';
@@ -31,7 +31,7 @@ export function History({ user }: { user: StaffUser }) {
           <Card>
             {list.map((c) => {
               const t = tally(c, state.statusTypes);
-              return <ListRow key={c.id} to={`/check/${c.id}`} title={`${c.scheduleName} · ${c.floorName}`} subtitle={`${c.raName} · ${c.source === 'paper' ? 'entered from paper' : `submitted ${formatClock(c.submittedAt!)}`}`} trail={<Counts codes={t.byCode} present={t.present} absent={t.absent} excused={t.excused} />} chevron />;
+              return <ListRow key={c.id} to={`/check/${c.id}`} title={`${c.scheduleName} · ${c.floorName}`} subtitle={`${c.raName} · ${sourceNote(c) ?? `submitted ${formatClock(c.submittedAt!)}`}`} trail={<Counts codes={t.byCode} present={t.present} absent={t.absent} excused={t.excused} />} chevron />;
             })}
           </Card>
         </div>

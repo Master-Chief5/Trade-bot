@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { actions, useAppState } from '../lib/store';
-import { canEditCheck, canReopenCheck, defaultStatus, naturalCompare, sortedStatusTypes, statusById, tally } from '../lib/checks';
+import { canEditCheck, canReopenCheck, defaultStatus, naturalCompare, sortedStatusTypes, sourceNote, statusById, tally } from '../lib/checks';
 import { formatClock, formatDate, formatTime12 } from '../lib/dates';
 import { visibleFloorIds } from '../lib/permissions';
 import type { CheckEntry, StaffUser } from '../lib/types';
@@ -80,6 +80,8 @@ export function CheckScreen({ user }: { user: StaffUser }) {
             <span className="tag present"><Icon name="check" size={14} stroke={2.4} />Submitted {formatClock(check.submittedAt)}</span>
           ) : check.source === 'paper' ? (
             <span className="tag lamp"><Icon name="pencil" size={14} />From paper</span>
+          ) : check.source === 'cover' ? (
+            <span className="tag lamp"><Icon name="user" size={14} />Covered</span>
           ) : undefined
         }
       />
@@ -92,7 +94,7 @@ export function CheckScreen({ user }: { user: StaffUser }) {
         <p className="muted small">Everyone starts as {def.name}. Tap a status to change it. Tap a name to add a note or pick another status.</p>
       ) : (
         <p className="muted small">
-          {check.raName}{check.source === 'paper' ? ' · entered from paper' : ''}{check.submittedAt ? ` · submitted ${formatClock(check.submittedAt)}` : ' · in progress'}
+          {check.raName}{sourceNote(check) ? ` · ${sourceNote(check)}` : ''}{check.submittedAt ? ` · submitted ${formatClock(check.submittedAt)}` : ' · in progress'}
         </p>
       )}
       {check.entries.length > 8 && (

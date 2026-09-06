@@ -66,7 +66,12 @@ export function Cover() {
     }
   }, [id, saved]);
 
-  useEffect(() => { void reopen(); }, [reopen]);
+  // Re-open only when there is nothing on screen yet. After a claim the payload is already in
+  // hand, and after each submit it still is; a flaky network on those re-fetches must not replace
+  // a working page with an error.
+  useEffect(() => {
+    if (!payload) void reopen();
+  }, [reopen, payload]);
 
   const claim = async () => {
     if (!validFullName(name)) return toast('Enter your first and last name.', 'error');
