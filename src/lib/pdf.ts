@@ -374,3 +374,60 @@ export function downloadPdf(doc: jsPDF, filename: string) {
 export function safeName(s: string): string {
   return s.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
 }
+
+/**
+ * The sheet a dean prints once and locks away: the dorm's recovery code, with what it is for and
+ * what to do with it. The code appears nowhere else, so this page is the only copy.
+ */
+export function recoverySheet(dormName: string, code: string, madeBy: string, madeAt: string): jsPDF {
+  const doc = newDoc();
+  let y = block(doc, `${dormName} — Room Check recovery code`, M + 8, 16, { bold: true });
+  y = block(doc, 'Keep this page where only the deans can reach it. It opens every record the dorm has.', y + 3, 10.5);
+  y = block(doc, `Made by ${madeBy} on ${formatDateLong(madeAt.slice(0, 10))}. Making a new code cancels this one.`, y + 1.5, 9.5, { grey: true });
+
+  // The code itself: large, monospaced, in groups of four, boxed so it is obvious what to copy.
+  const boxY = y + 8;
+  const boxH = 30;
+  doc.setDrawColor(40);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(M, boxY, TEXT_W, boxH, 2, 2);
+  doc.setFont('courier', 'bold');
+  doc.setFontSize(21);
+  doc.setTextColor(20);
+  const groups = code.split('-');
+  doc.text(groups.slice(0, 4).join('  '), PAGE_W / 2, boxY + 12, { align: 'center' });
+  doc.text(groups.slice(4).join('  '), PAGE_W / 2, boxY + 24, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  y = boxY + boxH + 4;
+  y = block(doc, 'Letters and digits only. There is no letter O, I, L or U: read 0 as zero and 1 as one.', y + 2, 9, { grey: true });
+
+  y = block(doc, 'What it is for', y + 8, 12, { bold: true });
+  y = block(doc, 'Every phone that holds the dorm key can be lost at once — a dean\'s phone dies, the other is replaced, nobody thought about it. The server never had the key, so without this page the year\'s records are gone for good. With it, a dean on a brand-new phone gets everything back.', y + 2, 10.5);
+
+  y = block(doc, 'How to use it', y + 7, 12, { bold: true });
+  const steps = [
+    'On the new phone, open the app and sign in with a dean\'s account.',
+    'The screen will say the phone needs approval. Choose "I have a recovery code".',
+    'Type the code exactly as printed. Spaces, dashes and capitals do not matter.',
+    'The phone now holds the dorm key. Approve the other phones from Settings → Online sync as usual.',
+  ];
+  doc.setFontSize(10.5);
+  steps.forEach((s, i) => {
+    const lines = doc.splitTextToSize(`${i + 1}.  ${s}`, TEXT_W - 4) as string[];
+    doc.text(lines, M + 2, y + 5);
+    y += lines.length * 4.6 + 1.5;
+  });
+
+  y = block(doc, 'Keep it safe', y + 7, 12, { bold: true });
+  y = block(doc, 'Anyone with this page and a dean\'s password can read the dorm. Do not photograph it, do not email it, do not leave it in the office printer. If it is lost or seen, make a new code in Settings → Online sync; that cancels this one. When the dorm key is changed (which happens when someone is removed), the app tells you if this page needs reprinting.', y + 2, 10.5);
+
+  const lineY = Math.max(y + 18, PAGE_H - 40);
+  doc.setLineWidth(0.3);
+  doc.setDrawColor(60);
+  doc.setFontSize(9.5);
+  doc.line(M, lineY, M + 80, lineY);
+  doc.text('Kept by', M, lineY + 4);
+  doc.line(M + 92, lineY, PAGE_W - M, lineY);
+  doc.text('Where', M + 92, lineY + 4);
+  return doc;
+}

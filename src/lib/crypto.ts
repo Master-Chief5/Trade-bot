@@ -124,3 +124,71 @@ export async function fingerprint(jwk: JsonWebKey): Promise<string> {
   const hex = Array.from(hash.slice(0, 8)).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
   return (hex.match(/.{4}/g) ?? []).join(' ');
 }
+
+// ---------- recovery code ----------
+//
+// Every phone that holds the dorm key can be lost at once. When that happens the ciphertext
+// on the server is unreadable forever, because the server was never able to read it. A
+// recovery code is 160 random bits printed on paper and kept in a drawer: the dorm key is
+// sealed under a key derived from it, and a dean signing in on a fresh phone types it in.
+
+/** Crockford's base32: no I, L, O or U, so a code read off paper cannot be misread. */
+export const RECOVERY_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+export const RECOVERY_CODE_LENGTH = 32;
+const RECOVERY_ITERATIONS = 100_000;
+
+export function formatRecoveryCode(code: string): string {
+  return (code.match(/.{1,4}/g) ?? []).join('-');
+}
+
+/** 32 symbols of 5 bits each: 160 bits, from the CSPRNG. */
+export function generateRecoveryCode(): string {
+  const bytes = randomBytes(20);
+  let acc = 0;
+  let bits = 0;
+  let out = '';
+  for (const b of bytes) {
+    acc = (acc << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out += RECOVERY_ALPHABET[(acc >> bits) & 31];
+    }
+  }
+  return formatRecoveryCode(out);
+}
+
+/**
+ * What someone typed, as the 32 canonical symbols, or null if it is not a complete code.
+ * Case, spaces and dashes do not matter, and the letters the alphabet leaves out are read
+ * as the digits they look like.
+ */
+export function normalizeRecoveryCode(input: string): string | null {
+  const s = input.toUpperCase().replace(/[\s-]+/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+  if (s.length !== RECOVERY_CODE_LENGTH) return null;
+  for (const ch of s) if (!RECOVERY_ALPHABET.includes(ch)) return null;
+  return s;
+}
+
+/** The key a recovery code unlocks. Never extractable: it exists only to seal and open the dorm key. */
+export async function recoveryKek(code: string, saltB64: string): Promise<CryptoKey> {
+  const base = await subtle().importKey('raw', new TextEncoder().encode(code), 'PBKDF2', false, ['deriveKey']);
+  return subtle().deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(saltB64), iterations: RECOVERY_ITERATIONS },
+    base,
+    { name: 'AES-GCM', length: AES_LEN },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/** Seal the dorm key under any AES key, such as one derived from a recovery code. */
+export async function sealDormKey(wrapKey: CryptoKey, dormKey: CryptoKey, aad: string): Promise<string> {
+  const raw = new Uint8Array(await subtle().exportKey('raw', dormKey)) as Uint8Array<ArrayBuffer>;
+  return aesEncrypt(wrapKey, raw, aad);
+}
+
+export async function openDormKey(wrapKey: CryptoKey, sealed: string, aad: string, extractable = false): Promise<CryptoKey> {
+  const raw = await aesDecrypt(wrapKey, sealed, aad);
+  return subtle().importKey('raw', raw, { name: 'AES-GCM', length: AES_LEN }, extractable, ['encrypt', 'decrypt']);
+}

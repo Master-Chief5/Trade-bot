@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPayload, handoffUrl, normalizeName, validFullName } from '../src/lib/handoff';
+import { buildPayload, handoffUrl, normalizeName, resultInScope, validFullName } from '../src/lib/handoff';
 import { initialState } from '../src/lib/defaults';
 import type { AppState } from '../src/lib/types';
 
@@ -62,5 +62,23 @@ describe('what a handover hands over', () => {
     expect(validFullName('<script>alert(1)</script> x')).toBe(false);
     expect(validFullName('a'.repeat(90) + ' b')).toBe(false);
     expect(normalizeName('  Jordan   Miles  ')).toBe('Jordan Miles');
+  });
+});
+
+describe('what a handover accepts back', () => {
+  const scope = { floorId: 'f1', checks: [{ scheduleId: 's1', name: 'Room check', time: '22:00', days: [0, 1, 2, 3, 4] }] };
+
+  it('takes a check for the floor, check and nights it covered', () => {
+    expect(resultInScope({ floorId: 'f1', scheduleId: 's1', date: '2026-09-07' }, scope, '2026-09-06', '2026-09-08')).toBe(true);
+    expect(resultInScope({ floorId: 'f1', scheduleId: 's1', date: '2026-09-06' }, scope, '2026-09-06', '2026-09-08')).toBe(true);
+    expect(resultInScope({ floorId: 'f1', scheduleId: 's1', date: '2026-09-08' }, scope, '2026-09-06', '2026-09-08')).toBe(true);
+  });
+
+  it('drops a check for another floor, another schedule, or a night outside the cover', () => {
+    expect(resultInScope({ floorId: 'f2', scheduleId: 's1', date: '2026-09-07' }, scope, '2026-09-06', '2026-09-08')).toBe(false);
+    expect(resultInScope({ floorId: 'f1', scheduleId: 's9', date: '2026-09-07' }, scope, '2026-09-06', '2026-09-08')).toBe(false);
+    expect(resultInScope({ floorId: 'f1', scheduleId: 's1', date: '2026-09-05' }, scope, '2026-09-06', '2026-09-08')).toBe(false);
+    expect(resultInScope({ floorId: 'f1', scheduleId: 's1', date: '2026-09-09' }, scope, '2026-09-06', '2026-09-08')).toBe(false);
+    expect(resultInScope({ floorId: 'f1', scheduleId: 's1', date: 'tonight' }, scope, '2026-09-06', '2026-09-08')).toBe(false);
   });
 });

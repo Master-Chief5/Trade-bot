@@ -48,6 +48,16 @@ export function DeanTonight({ user }: { user: StaffUser }) {
         subtitle={schedules.length ? `${submittedCount} of ${slots.length} floor checks in · ${absent.length} absent` : 'No check scheduled today'}
         actions={canPrint ? <Button variant="outline" size="sm" icon="print" onClick={printTonight} disabled={!tonightChecks.length}>Tonight's sheet</Button> : undefined}
       />
+      {user.role === 'dean' && online.dorm && online.recovery.state === 'none' && (
+        <Banner kind="warn" icon="lock">
+          No recovery code yet. If every phone holding the dorm key is lost, this year's records are gone with them. <Link to="/settings/sync">Make one</Link>
+        </Banner>
+      )}
+      {user.role === 'dean' && online.dorm && online.recovery.state === 'ready' && online.recovery.keyVersion < online.dorm.keyVersion && (
+        <Banner kind="warn" icon="lock">
+          The printed recovery code is out of date since the dorm key changed. <Link to="/settings/sync">Print a new one</Link>
+        </Banner>
+      )}
       {user.role === 'dean' && online.pendingRequests > 0 && (
         <Banner kind="info" icon="user">
           {online.pendingRequests} {online.pendingRequests === 1 ? 'person is' : 'people are'} waiting to be activated. <Link to="/settings/sync">Open Online sync</Link>

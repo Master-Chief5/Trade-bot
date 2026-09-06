@@ -9,8 +9,8 @@
 import { createClient, type RealtimeChannel, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { del, get, set } from 'idb-keyval';
 import { useSyncExternalStore } from 'react';
-import { decryptJson, encryptJson, fingerprint, generateDeviceKeyPair, generateDormKey, unwrapDormKey, wrapDormKey } from './crypto';
-import { HANDOFF_AAD, listHandoffs, listResults, unwrapHandoffKey, type HandoffClaim, type HandoffResult } from './handoff';
+import { decryptJson, encryptJson, fingerprint, generateDeviceKeyPair, generateDormKey, generateRecoveryCode, normalizeRecoveryCode, openDormKey, randomBytes, recoveryKek, sealDormKey, toB64, unwrapDormKey, wrapDormKey } from './crypto';
+import { HANDOFF_AAD, listHandoffs, listResults, resultInScope, unwrapHandoffKey, type HandoffClaim, type HandoffPayload, type HandoffResult } from './handoff';
 import { initialState } from './defaults';
 import { actions, applyEvent, getState, rebase, replaceState, setRecorder, type StoreEvent } from './store';
 import type { AppState, Role, StaffUser } from './types';
@@ -50,9 +50,24 @@ interface SyncMeta {
 }
 type MetaStore = Record<string, SyncMeta>;
 
+/**
+ * The key a recovery code unlocks, kept on a dean's device that has held the code, so that a
+ * key rotation from this device can re-seal the new dorm key under the same printout.
+ */
+interface RecoveryHold {
+  kek: CryptoKey;
+  salt: string;
+}
+type RecoveryStore = Record<string, RecoveryHold>;
+
+/** For deans: whether the dorm has a printed recovery code, and which key version it opens. */
+export type RecoveryStatus = { state: 'unknown' } | { state: 'none' } | { state: 'ready'; keyVersion: number; updatedAt: string };
+const RECOVERY_UNKNOWN: RecoveryStatus = { state: 'unknown' };
+
 const DEVICE_KEY = 'rh-device-v1';
 const KEYS_KEY = 'rh-dorm-keys-v2';
 const META_KEY = 'rh-sync-v2';
+const RECOVERY_KEY = 'rh-recovery-v1';
 
 async function loadDevice(): Promise<DeviceRecord> {
   const saved = (await get(DEVICE_KEY)) as DeviceRecord | undefined;
@@ -89,12 +104,13 @@ export interface OnlineState {
   pendingRequests: number;
   /** True when this device still holds a synced dorm but has no signed-in session. */
   needsSignIn: boolean;
+  recovery: RecoveryStatus;
   sync: { lastSyncAt: string | null; pendingCount: number; error: string | null; busy: boolean };
 }
 
 let online: OnlineState = {
   ready: false, session: null, displayName: '', deviceId: null, deviceFingerprint: '', membership: null, dorm: null, joinCode: null,
-  hasKey: false, pendingRequests: 0, needsSignIn: false,
+  hasKey: false, pendingRequests: 0, needsSignIn: false, recovery: RECOVERY_UNKNOWN,
   sync: { lastSyncAt: null, pendingCount: 0, error: null, busy: false },
 };
 const listeners = new Set<() => void>();
@@ -135,6 +151,7 @@ export function useOnline(): OnlineState {
 let device: DeviceRecord | null = null;
 let keyStore: KeyStore = {};
 let metaStore: MetaStore = {};
+let recoveryStore: RecoveryStore = {};
 let syncingDorm: string | null = null;
 let channels: RealtimeChannel[] = [];
 let waitingChannels: RealtimeChannel[] = [];
@@ -156,6 +173,7 @@ export async function initOnline(): Promise<void> {
   device = await loadDevice();
   keyStore = ((await get(KEYS_KEY)) as KeyStore | undefined) ?? {};
   metaStore = ((await get(META_KEY)) as MetaStore | undefined) ?? {};
+  recoveryStore = ((await get(RECOVERY_KEY)) as RecoveryStore | undefined) ?? {};
   setOnline({ deviceFingerprint: await fingerprint(device.publicJwk) });
   const sb = supabase();
   const { data } = await sb.auth.getSession();
@@ -176,7 +194,7 @@ async function onSession(session: Session | null) {
     stopSync();
     stopWaiting();
     // Keep the dorm data: a refresh-token blip must not destroy a dorm. Ask them to sign in again.
-    setOnline({ session: null, displayName: '', membership: null, dorm: null, joinCode: null, hasKey: false, pendingRequests: 0, needsSignIn: Object.keys(metaStore).length > 0 });
+    setOnline({ session: null, displayName: '', membership: null, dorm: null, joinCode: null, hasKey: false, pendingRequests: 0, recovery: RECOVERY_UNKNOWN, needsSignIn: Object.keys(metaStore).length > 0 });
     return;
   }
   const displayName = (session.user.user_metadata?.display_name as string | undefined) ?? session.user.email ?? 'Someone';
@@ -217,7 +235,7 @@ export async function refreshMembership(): Promise<void> {
   const row = (rows ?? []).find((m) => m.status === 'active') ?? (rows ?? []).find((m) => m.status === 'pending') ?? (rows ?? [])[0];
   if (!row) {
     stopSync();
-    setOnline({ membership: null, dorm: null, joinCode: null, hasKey: false });
+    setOnline({ membership: null, dorm: null, joinCode: null, hasKey: false, recovery: RECOVERY_UNKNOWN });
     return;
   }
   const membership = { dormId: row.dorm_id as string, role: row.role as Role, status: row.status as MembershipStatus };
@@ -236,6 +254,7 @@ export async function refreshMembership(): Promise<void> {
     const { data: code } = await sb.rpc('dorm_join_code', { p_dorm: membership.dormId });
     setOnline({ joinCode: (code as string | null) ?? null });
     void refreshPendingCount();
+    void refreshRecovery(membership.dormId);
   }
   if (hasKey) {
     stopWaiting();
@@ -266,6 +285,9 @@ function stopWaiting() {
 
 async function saveKeys() {
   await set(KEYS_KEY, keyStore);
+}
+async function saveRecovery() {
+  await set(RECOVERY_KEY, recoveryStore);
 }
 async function saveMeta() {
   await set(META_KEY, metaStore);
@@ -353,13 +375,15 @@ export async function signOutAndWipe(): Promise<void> {
   }
   keyStore = {};
   metaStore = {};
+  recoveryStore = {};
   await del(KEYS_KEY);
   await del(META_KEY);
+  await del(RECOVERY_KEY);
   if (device) {
     device = { privateKey: device.privateKey, publicJwk: device.publicJwk };
     await set(DEVICE_KEY, device);
   }
-  setOnline({ deviceId: null, needsSignIn: false });
+  setOnline({ deviceId: null, needsSignIn: false, recovery: RECOVERY_UNKNOWN });
   replaceState(initialState());
 }
 
@@ -548,7 +572,12 @@ export async function revokeMember(userId: string, actor: StaffUser): Promise<On
   const { error } = await sb.from('memberships').update({ status: 'revoked', decided_by: online.session?.user.id, decided_at: new Date().toISOString() }).eq('dorm_id', dorm.id).eq('user_id', userId);
   if (error) return { ok: false, error: error.message };
   const { data: theirDevices } = await sb.from('devices').select('id').eq('user_id', userId);
-  if (theirDevices?.length) await sb.from('key_grants').delete().eq('dorm_id', dorm.id).in('device_id', theirDevices.map((d) => d.id as string));
+  if (theirDevices?.length) {
+    const ids = theirDevices.map((d) => d.id as string);
+    await sb.from('key_grants').delete().eq('dorm_id', dorm.id).in('device_id', ids);
+    // Anyone still covering a check on their behalf loses that page too.
+    await sb.from('handoffs').update({ revoked_at: new Date().toISOString() }).eq('dorm_id', dorm.id).is('revoked_at', null).in('created_by_device', ids);
+  }
   const staff = getState().staff.find((s) => s.authUserId === userId);
   if (staff) actions.updateStaff(staff.id, { active: false }, actor);
   await regenerateJoinCode();
@@ -568,15 +597,29 @@ export async function rotateKey(): Promise<OnlineResult> {
   const key = existing?.extractable ? existing.key : await generateDormKey();
   keyStore[dorm.id] = { ...(keyStore[dorm.id] ?? {}), [version]: { key, extractable: true } };
   await saveKeys();
+  // The new key goes only to phones a dean approved for the outgoing one. Every phone of every
+  // member would include phones nobody ever ticked, which is exactly what per-phone approval
+  // exists to keep out. Membership is checked as well, so a removed member's leftover grant
+  // (if a delete failed) cannot carry them across a rotation.
   const { data: members } = await sb.from('memberships').select('user_id').eq('dorm_id', dorm.id).eq('status', 'active');
   const { data: devices } = await sb.from('devices').select('id').in('user_id', (members ?? []).map((m) => m.user_id as string));
-  const err = await grantToDevices(dorm.id, version, (devices ?? []).map((d) => d.id as string));
+  const { data: holders } = await sb.from('key_grants').select('device_id').eq('dorm_id', dorm.id).eq('key_version', dorm.keyVersion);
+  const stillIn = new Set((devices ?? []).map((d) => d.id as string));
+  const targets = (holders ?? []).map((g) => g.device_id as string).filter((id) => stillIn.has(id));
+  if (device.deviceId && !targets.includes(device.deviceId)) targets.push(device.deviceId);
+  const err = await grantToDevices(dorm.id, version, targets);
   if (err) return { ok: false, error: `${err} Nothing has changed yet; try again.` };
   const { error } = await sb.from('dorms').update({ key_version: version }).eq('id', dorm.id);
   if (error) return { ok: false, error: error.message };
   setOnline({ dorm: { ...dorm, keyVersion: version } });
   await uploadSnapshot();
-  return { ok: true };
+  // A printout made from this device (or typed into it) keeps working across the rotation.
+  // One made elsewhere cannot be re-sealed here, so say so: the deans must print a new one.
+  const resealed = recoveryStore[dorm.id] ? await resealRecovery(dorm.id, version, key) : false;
+  if (!resealed) await refreshRecovery(dorm.id);
+  const r = online.recovery;
+  const note = r.state === 'ready' && r.keyVersion < version ? 'The recovery code is now out of date. Print a new one under Online sync.' : undefined;
+  return { ok: true, note };
 }
 
 export async function regenerateJoinCode(): Promise<OnlineResult> {
@@ -585,6 +628,122 @@ export async function regenerateJoinCode(): Promise<OnlineResult> {
   const { data, error } = await supabase().rpc('regenerate_join_code', { p_dorm: dorm.id });
   if (error) return { ok: false, error: error.message };
   setOnline({ joinCode: data as string });
+  return { ok: true };
+}
+
+// ---------- recovery code ----------
+
+function recoveryAad(dormId: string, version: number): string {
+  return `${dormId}:${version}:recovery`;
+}
+
+/** Re-read whether the dorm has a recovery code, and bring a stale seal up to date if this device can. */
+async function refreshRecovery(dormId: string): Promise<void> {
+  const { data } = await supabase().from('recovery_keys').select('key_version, salt, updated_at').eq('dorm_id', dormId).maybeSingle();
+  if (!data) {
+    if (recoveryStore[dormId]) {
+      delete recoveryStore[dormId];
+      await saveRecovery();
+    }
+    setOnline({ recovery: { state: 'none' } });
+    return;
+  }
+  const local = recoveryStore[dormId];
+  if (local && local.salt !== data.salt) {
+    // Another dean made a new code; the one this device knew is dead.
+    delete recoveryStore[dormId];
+    await saveRecovery();
+  }
+  const current = online.dorm?.id === dormId ? online.dorm.keyVersion : null;
+  const holder = current !== null ? held(dormId, current) : undefined;
+  if (recoveryStore[dormId] && current !== null && (data.key_version as number) < current && holder?.extractable) {
+    if (await resealRecovery(dormId, current, holder.key)) return;
+  }
+  setOnline({ recovery: { state: 'ready', keyVersion: data.key_version as number, updatedAt: data.updated_at as string } });
+}
+
+/** Seal `key` (dorm key `version`) under the recovery code this device holds. False if it no longer applies. */
+async function resealRecovery(dormId: string, version: number, key: CryptoKey): Promise<boolean> {
+  const local = recoveryStore[dormId];
+  if (!local) return false;
+  const sealed = await sealDormKey(local.kek, key, recoveryAad(dormId, version));
+  const updatedAt = new Date().toISOString();
+  // Matching on the salt means a code replaced elsewhere in the meantime is left alone.
+  const { data, error } = await supabase().from('recovery_keys').update({ key_version: version, sealed_key: sealed, updated_at: updatedAt }).eq('dorm_id', dormId).eq('salt', local.salt).select('dorm_id');
+  if (error || !data?.length) return false;
+  setOnline({ recovery: { state: 'ready', keyVersion: version, updatedAt } });
+  return true;
+}
+
+/**
+ * Make (or replace) the dorm's recovery code. The code is returned exactly once, for the dean to
+ * print; it is not kept anywhere in the clear. Replacing the code kills the old printout.
+ */
+export async function createRecoveryCode(): Promise<OnlineResult & { code?: string }> {
+  const dorm = online.dorm;
+  if (!dorm || online.membership?.role !== 'dean' || !online.session) return { ok: false, error: 'Only a dean can make a recovery code.' };
+  const holder = held(dorm.id, dorm.keyVersion);
+  if (!holder?.extractable) return { ok: false, error: 'This device does not hold the current dorm key. Sync first, then try again.' };
+  const code = generateRecoveryCode();
+  const salt = toB64(randomBytes(16));
+  const kek = await recoveryKek(normalizeRecoveryCode(code)!, salt);
+  const sealed = await sealDormKey(kek, holder.key, recoveryAad(dorm.id, dorm.keyVersion));
+  const { error } = await supabase().from('recovery_keys').upsert(
+    { dorm_id: dorm.id, key_version: dorm.keyVersion, salt, sealed_key: sealed, created_by: online.session.user.id, updated_at: new Date().toISOString() },
+    { onConflict: 'dorm_id' },
+  );
+  if (error) return { ok: false, error: error.message };
+  recoveryStore[dorm.id] = { kek, salt };
+  await saveRecovery();
+  await refreshRecovery(dorm.id);
+  return { ok: true, code };
+}
+
+export async function deleteRecoveryCode(): Promise<OnlineResult> {
+  const dorm = online.dorm;
+  if (!dorm || online.membership?.role !== 'dean') return { ok: false, error: 'Only a dean can do that.' };
+  const { error } = await supabase().from('recovery_keys').delete().eq('dorm_id', dorm.id);
+  if (error) return { ok: false, error: error.message };
+  delete recoveryStore[dorm.id];
+  await saveRecovery();
+  setOnline({ recovery: { state: 'none' } });
+  return { ok: true };
+}
+
+/**
+ * A dean on a phone that has no key types the printed code. On success this phone holds the
+ * dorm key like any approved phone and can pass it on, so the dorm is fully back.
+ */
+export async function recoverWithCode(input: string): Promise<OnlineResult> {
+  await sessionReady;
+  const dorm = online.dorm;
+  const m = online.membership;
+  if (!dorm || !m || m.status !== 'active' || m.role !== 'dean') return { ok: false, error: 'Only an active dean can use a recovery code.' };
+  if (!device?.deviceId) return { ok: false, error: 'This phone could not be registered. Check the connection and try again.' };
+  const code = normalizeRecoveryCode(input);
+  if (!code) return { ok: false, error: 'A recovery code is 32 letters and numbers. Check it against the printout.' };
+  const { data, error } = await supabase().from('recovery_keys').select('key_version, salt, sealed_key').eq('dorm_id', dorm.id).maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: 'This dorm has no recovery code on file. Another dean\'s phone will have to approve this one.' };
+  const version = data.key_version as number;
+  const kek = await recoveryKek(code, data.salt as string);
+  let key: CryptoKey;
+  try {
+    key = await openDormKey(kek, data.sealed_key as string, recoveryAad(dorm.id, version), true);
+  } catch {
+    return { ok: false, error: 'That code does not open this dorm. Check each character against the printout; 0 and O, 1 and I read the same here.' };
+  }
+  if (version !== dorm.keyVersion) {
+    return { ok: false, error: `This code was printed before the dorm key last changed, so it opens an older key and not the current records. Another dean's phone will have to approve this one.` };
+  }
+  keyStore[dorm.id] = { ...(keyStore[dorm.id] ?? {}), [version]: { key, extractable: true } };
+  await saveKeys();
+  recoveryStore[dorm.id] = { kek, salt: data.salt as string };
+  await saveRecovery();
+  // Grant this phone formally too, so it is listed like every other approved phone.
+  const err = await grantToDevices(dorm.id, version, [device.deviceId]);
+  if (err) console.warn('Recovered the key but could not record a grant for this phone', err);
+  await refreshMembership();
   return { ok: true };
 }
 
@@ -798,14 +957,23 @@ async function collectCovers(dormId: string) {
       }
       const result = await decryptJson<HandoffResult>(k, row.payload, HANDOFF_AAD);
       const claim = h.claim ? await decryptJson<HandoffClaim>(k, h.claim, HANDOFF_AAD) : null;
+      // The coverer holds K and the token, so a result is only as honest as the person sending
+      // it. Everything about *which* check it is comes from what the RA sealed when handing
+      // over, and from the dates the relay recorded, never from the result itself.
+      const scope = await decryptJson<HandoffPayload>(k, h.payload, HANDOFF_AAD);
+      if (!resultInScope(result, scope, h.coversFrom, h.coversTo)) {
+        console.warn('Dropped a returned check outside the handoff it came from', { handoff: h.id, result: row.id });
+        meta.lastResultId = row.id;
+        continue;
+      }
       const who = claim?.name ?? result.by;
       const res = actions.applyCoverResult({
         handoffId: h.id,
         scheduleId: result.scheduleId,
-        floorId: result.floorId,
+        floorId: scope.floorId,
         date: result.date,
-        forRaId: result.forRaId,
-        forRaName: result.forRaName,
+        forRaId: scope.forRaId,
+        forRaName: scope.forRaName,
         coveredBy: who,
         startedAt: result.startedAt,
         submittedAt: result.submittedAt,

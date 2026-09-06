@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { approveRequest, declineRequest, grantDevice, listMembers, listPending, onlineAvailable, regenerateJoinCode, revokeMember, signOutAndWipe, syncNow, useOnline, type MemberDevice, type PendingRequest } from '../../lib/online';
+import { approveRequest, createRecoveryCode, declineRequest, deleteRecoveryCode, grantDevice, listMembers, listPending, onlineAvailable, regenerateJoinCode, revokeMember, signOutAndWipe, syncNow, useOnline, type MemberDevice, type PendingRequest } from '../../lib/online';
 import { useAppState } from '../../lib/store';
 import { sortedFloors } from '../../lib/checks';
 import { formatDateTime } from '../../lib/dates';
+import { openPdf, recoverySheet, safeName } from '../../lib/pdf';
 import { roleLabel } from '../../lib/permissions';
 import type { Role, StaffUser } from '../../lib/types';
 import { Button } from '../../ui/Button';
@@ -20,6 +21,8 @@ export function SyncSettings({ user }: { user: StaffUser }) {
   const [pending, setPending] = useState<PendingRequest[]>([]);
   const [members, setMembers] = useState<MemberDevice[]>([]);
   const [approving, setApproving] = useState<PendingRequest | null>(null);
+  const [freshCode, setFreshCode] = useState<{ code: string; at: string } | null>(null);
+  const [makingCode, setMakingCode] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const dormId = online.dorm?.id;
@@ -117,13 +120,34 @@ export function SyncSettings({ user }: { user: StaffUser }) {
                 </span>
                 {m.userId !== online.session?.user.id && (
                   <span className="trail">
-                    <Button variant="danger" size="sm" onClick={() => { if (window.confirm(`Remove ${m.name}? Their phones lose access and the dorm key is changed.`)) void revokeMember(m.userId, user).then((r) => { toast(r.ok ? 'Removed and key rotated' : r.error, r.ok ? 'ok' : 'error'); void reload(); }); }}>Remove</Button>
+                    <Button variant="danger" size="sm" onClick={() => { if (window.confirm(`Remove ${m.name}? Their phones lose access and the dorm key is changed.`)) void revokeMember(m.userId, user).then((r) => { toast(r.ok ? (r.note ? `Removed and key rotated. ${r.note}` : 'Removed and key rotated') : r.error, r.ok ? 'ok' : 'error'); void reload(); }); }}>Remove</Button>
                   </span>
                 )}
               </div>
             ))}
           </Card>
           <p className="muted small">Approving sends the dorm key to that phone, sealed so only it can open it. Compare the fingerprint with the one on their screen if you want to be sure it is their phone.</p>
+
+          <SectionLabel>Recovery code</SectionLabel>
+          <RecoveryCard
+            recovery={online.recovery}
+            keyVersion={online.dorm.keyVersion}
+            busy={makingCode}
+            onMake={() => {
+              if (online.recovery.state === 'ready' && !window.confirm('Make a new code? The printout you have now stops working.')) return;
+              setMakingCode(true);
+              void createRecoveryCode().then((r) => {
+                setMakingCode(false);
+                if (!r.ok) return toast(r.error, 'error');
+                if (!r.code) return toast('Could not make a code.', 'error');
+                setFreshCode({ code: r.code, at: new Date().toISOString() });
+              });
+            }}
+            onRemove={() => {
+              if (!window.confirm('Remove the recovery code? The printout stops working, and if every phone with the key is lost the records are gone.')) return;
+              void deleteRecoveryCode().then((r) => toast(r.ok ? 'Recovery code removed' : r.error, r.ok ? 'ok' : 'error'));
+            }}
+          />
         </>
       )}
 
@@ -132,6 +156,20 @@ export function SyncSettings({ user }: { user: StaffUser }) {
       )}
 
       <Button variant="danger" icon="logout" onClick={() => { if (window.confirm('Sign out and remove the dorm data from this device?')) void signOutAndWipe().then(() => navigate('/', { replace: true })); }}>Sign out of this device</Button>
+
+      <Sheet open={!!freshCode} title="Your recovery code" onClose={() => { if (window.confirm('Close without printing? The code cannot be shown again; you would make a new one.')) setFreshCode(null); }}>
+        {freshCode && (
+          <div className="stack">
+            <div className="mono recovery-code" aria-label="Recovery code">
+              {freshCode.code.split('-').map((g, i) => <span key={i}>{g}</span>)}
+            </div>
+            <Banner kind="warn">This is the only time it is shown. Print it, put it where only the deans can reach it, and do not photograph it.</Banner>
+            <p className="muted small">A dean signing in on a new phone types this in and gets the dorm key without any other phone's help. If the printout is lost or seen, make a new code; that cancels this one.</p>
+            <Button size="lg" icon="print" onClick={() => openPdf(recoverySheet(online.dorm?.name ?? state.settings.dormName, freshCode.code, online.displayName, freshCode.at), `${safeName(state.settings.dormName)}-recovery-code.pdf`)}>Print it</Button>
+            <Button variant="outline" onClick={() => setFreshCode(null)}>I have printed it</Button>
+          </div>
+        )}
+      </Sheet>
 
       <Sheet open={!!approving} title={approving ? `Activate ${approving.name}` : ''} onClose={() => setApproving(null)}>
         {approving && (
@@ -197,5 +235,29 @@ function ApproveForm({ request, floors, headRAEnabled, onDone }: { request: Pend
       </div>
       <Button size="lg" disabled={busy} onClick={() => { setBusy(true); void onDone(role, role === 'dean' ? [] : floorIds, deviceIds).finally(() => setBusy(false)); }}>{busy ? 'Activating…' : 'Activate'}</Button>
     </div>
+  );
+}
+
+function RecoveryCard({ recovery, keyVersion, busy, onMake, onRemove }: { recovery: ReturnType<typeof useOnline>['recovery']; keyVersion: number; busy: boolean; onMake: () => void; onRemove: () => void }) {
+  const stale = recovery.state === 'ready' && recovery.keyVersion < keyVersion;
+  return (
+    <Card pad>
+      <div className="stack-sm">
+        {recovery.state === 'none' && (
+          <Banner kind="warn" icon="lock">No recovery code. If every phone holding the dorm key is lost, the year's records go with them: the server cannot read them and neither can anyone else.</Banner>
+        )}
+        {stale && (
+          <Banner kind="warn" icon="lock">The dorm key changed after the code was printed, so the printout no longer opens the current records. Make a new one and destroy the old page.</Banner>
+        )}
+        {recovery.state === 'ready' && !stale && (
+          <p className="small"><strong>On file.</strong> Made {formatDateTime(recovery.updatedAt)}. Keep the printout where only the deans can reach it.</p>
+        )}
+        <p className="muted small">A recovery code is 32 letters and numbers on one sheet of paper. A dean who signs in on a brand-new phone types it in and the phone gets the dorm key without any other phone's help.</p>
+        <div className="row">
+          <Button size="sm" disabled={busy || recovery.state === 'unknown'} onClick={onMake}>{busy ? 'Making…' : recovery.state === 'ready' ? 'Make a new code' : 'Make a recovery code'}</Button>
+          {recovery.state === 'ready' && <Button variant="ghost" size="sm" onClick={onRemove}>Remove</Button>}
+        </div>
+      </div>
+    </Card>
   );
 }

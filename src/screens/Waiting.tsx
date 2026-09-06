@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { refreshMembership, signOutAndWipe, syncNow, useOnline } from '../lib/online';
+import { recoverWithCode, refreshMembership, signOutAndWipe, syncNow, useOnline } from '../lib/online';
+import { TextInput } from '../ui/Form';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { Card } from '../ui/Layout';
@@ -9,6 +10,17 @@ import { toast } from '../ui/toast';
 export function Waiting({ reason }: { reason: 'pending' | 'device' | 'syncing' | 'revoked' }) {
   const online = useOnline();
   const navigate = useNavigate();
+  const [code, setCode] = useState('');
+  const [recovering, setRecovering] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const canRecover = reason === 'device' && online.membership?.role === 'dean';
+  const recover = async () => {
+    setRecovering(true);
+    const res = await recoverWithCode(code);
+    setRecovering(false);
+    if (res.ok) toast('Dorm key recovered');
+    else toast(res.error, 'error');
+  };
   useEffect(() => {
     const t = setInterval(() => void refreshMembership().then(() => syncNow()), 15_000);
     return () => clearInterval(t);
@@ -32,6 +44,28 @@ export function Waiting({ reason }: { reason: 'pending' | 'device' | 'syncing' |
         </div>
       </div>
       <p className="muted">{body}</p>
+      {canRecover && !showRecovery && (
+        <Button variant="outline" icon="lock" onClick={() => setShowRecovery(true)}>I have a recovery code</Button>
+      )}
+      {canRecover && showRecovery && (
+        <Card pad>
+          <div className="stack">
+            <TextInput
+              label="Recovery code"
+              value={code}
+              autoFocus
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="text"
+              placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+              onChange={(e) => setCode(e.target.value)}
+              help="The 32 characters on the printed sheet. Spaces, dashes and capitals do not matter."
+            />
+            <Button size="lg" disabled={recovering || code.replace(/[\s-]/g, '').length < 32} onClick={() => void recover()}>{recovering ? 'Opening…' : 'Open the dorm'}</Button>
+          </div>
+        </Card>
+      )}
       <Card pad>
         <div className="stack-sm">
           <div className="eyebrow">This phone's key fingerprint</div>

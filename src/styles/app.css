@@ -389,3 +389,6 @@ table.plain th { font-size: 12px; text-transform: uppercase; letter-spacing: .06
   padding: 10px;
   box-sizing: content-box;
 }
+
+/* Recovery code, shown once: big, grouped, wraps on a phone. */
+.recovery-code { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; font-size: 22px; font-weight: 700; letter-spacing: 0.08em; padding: 14px 8px; background: var(--surface-2); border-radius: 12px; user-select: all; }

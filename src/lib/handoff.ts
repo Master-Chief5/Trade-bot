@@ -10,6 +10,7 @@
  * K is also sealed under the dorm key, so a dean's phone can read who claimed the code and
  * what they submitted without ever having scanned it.
  */
+import { isDateKey } from './dates';
 import { decryptJson, encryptJson, exportDormKey, importDormKey, randomBytes, toB64 } from './crypto';
 import { supabase } from './online';
 import type { AppState, Boy, Room, StatusType } from './types';
@@ -225,6 +226,8 @@ export interface HandoffRow {
   id: string;
   keyVersion: number;
   wrappedKey: string;
+  /** The scope the RA sealed: which floor, which checks, which dates. Results are held to it. */
+  payload: string;
   coversFrom: string;
   coversTo: string;
   expiresAt: string;
@@ -237,7 +240,7 @@ export interface HandoffRow {
 export async function listHandoffs(dormId: string): Promise<HandoffRow[]> {
   const { data, error } = await supabase()
     .from('handoffs')
-    .select('id, key_version, wrapped_key, covers_from, covers_to, expires_at, claimed_at, claim, revoked_at, created_at')
+    .select('id, key_version, wrapped_key, payload, covers_from, covers_to, expires_at, claimed_at, claim, revoked_at, created_at')
     .eq('dorm_id', dormId)
     .order('created_at', { ascending: false })
     .limit(50);
@@ -246,6 +249,7 @@ export async function listHandoffs(dormId: string): Promise<HandoffRow[]> {
     id: r.id as string,
     keyVersion: r.key_version as number,
     wrappedKey: r.wrapped_key as string,
+    payload: r.payload as string,
     coversFrom: r.covers_from as string,
     coversTo: r.covers_to as string,
     expiresAt: r.expires_at as string,
@@ -277,6 +281,17 @@ export async function listResults(dormId: string, afterId: number): Promise<Resu
     .limit(200);
   if (error) throw new Error(error.message);
   return (data ?? []).map((r) => ({ id: Number(r.id), handoffId: r.handoff_id as string, payload: r.payload as string }));
+}
+
+/**
+ * Whether a returned check is one the handoff actually covered. The coverer holds the key and
+ * the token, so a result is only as honest as its sender; which floor, which check and which
+ * night are therefore judged against what the RA sealed and the dates the relay recorded.
+ */
+export function resultInScope(result: Pick<HandoffResult, 'floorId' | 'scheduleId' | 'date'>, scope: Pick<HandoffPayload, 'floorId' | 'checks'>, coversFrom: string, coversTo: string): boolean {
+  return result.floorId === scope.floorId
+    && scope.checks.some((c) => c.scheduleId === result.scheduleId)
+    && isDateKey(result.date) && result.date >= coversFrom && result.date <= coversTo;
 }
 
 export { AAD as HANDOFF_AAD, toB64 };

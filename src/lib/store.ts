@@ -536,10 +536,12 @@ export const rawActions = {
     startedAt: string; submittedAt: string; entries: { boyId: string; statusId: string; note?: string }[];
   }): Result {
     const state = getState();
+    if (!isDateKey(input.date)) return { ok: false, error: 'That check has no proper date.' };
     if (findCheck(state, input.scheduleId, input.floorId, input.date)) return { ok: false, error: 'That check is already done.' };
     const schedule = state.schedules.find((s) => s.id === input.scheduleId);
     const floor = state.floors.find((f) => f.id === input.floorId);
     if (!schedule || !floor) return { ok: false, error: 'That check no longer exists.' };
+    if (!state.staff.some((s) => s.id === input.forRaId)) return { ok: false, error: 'That check is not for anyone on staff.' };
     const byBoy = new Map(input.entries.map((e) => [e.boyId, e]));
     update((d) => {
       const entries = boysOnFloor(d, input.floorId).map(({ boy, room }) => {

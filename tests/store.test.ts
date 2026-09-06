@@ -436,6 +436,19 @@ describe('assignments, reminders and covers', () => {
     expect(getState().checks[0].source).toBe('app');
   });
 
+  it('refuses a cover with no proper date or for nobody on staff', () => {
+    const alex = addRA('Alex', ['Floor 1'], dean);
+    const base = {
+      handoffId: 'h4', scheduleId: getState().schedules[0].id, floorId: floor('Floor 1').id,
+      forRaId: alex.id, forRaName: alex.name, coveredBy: 'Jordan Miles',
+      startedAt: new Date().toISOString(), submittedAt: new Date().toISOString(), entries: [],
+    };
+    expect(actions.applyCoverResult({ ...base, date: 'tonight' }).ok).toBe(false);
+    expect(actions.applyCoverResult({ ...base, date: todayKey(), forRaId: 'nobody', forRaName: 'Dean X' }).ok).toBe(false);
+    expect(getState().checks).toHaveLength(0);
+    expect(actions.applyCoverResult({ ...base, date: todayKey() }).ok).toBe(true);
+  });
+
   it('ignores a status the dorm does not have rather than trusting the sender', () => {
     const alex = addRA('Alex', ['Floor 1'], dean);
     actions.applyCoverResult({
