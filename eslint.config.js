@@ -3,7 +3,8 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dev-dist', 'node_modules', 'playwright-report', 'test-results'] },
+  // presentations/ holds standalone CommonJS slide generators with their own deps, not app code.
+  { ignores: ['dist', 'dev-dist', 'node_modules', 'playwright-report', 'test-results', 'presentations'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
