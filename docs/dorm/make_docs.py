@@ -278,21 +278,24 @@ def org_chart_page(c, page_no, total):
              "responsibilities. Solid lines show who a role answers to. Dashed lines show who checks on whom.")
     y = text_block(c, M, y, PAGE_W - 2 * M, simpleSplit(intro, F, 9.5, PAGE_W - 2 * M), F, 9.5, 12) - 14
 
-    def box(cx, cy, w, h, title, sub, bold=True):
+    def box(cx, cy, w, h, title, sub):
         c.setLineWidth(1.2); c.setFillColorRGB(*WHITE)
         c.rect(cx - w / 2, cy - h / 2, w, h, stroke=1, fill=1)
         c.setFillColorRGB(*BLACK)
-        c.setFont(FB, 11); c.drawCentredString(cx, cy + 4, title)
-        c.setFont(F, 8); c.drawCentredString(cx, cy - 8, sub)
+        lines = simpleSplit(sub, F, 8, w - 12)
+        c.setFont(FB, 11); c.drawCentredString(cx, cy + 6, title)
+        c.setFont(F, 8)
+        for i, ln in enumerate(lines):
+            c.drawCentredString(cx, cy - 6 - i * 9.5, ln)
 
     cxm = PAGE_W / 2
-    bw, bh = 150, 38
-    y_dean, y_hra, y_mid, y_jan = y - 24, y - 94, y - 164, y - 234
+    bw, bh = 150, 56
+    y_dean, y_hra, y_mid, y_jan = y - 30, y - 108, y - 186, y - 264
     box(cxm, y_dean, bw, bh, "Deans", "run the dorm; final say on everything")
-    box(cxm, y_hra, bw, bh, "Head RA", "organizes RAs and Monitors; night check")
+    box(cxm, y_hra, bw, bh, "Head RA", "organizes the RAs and Monitors; night facilities check")
     x_ra, x_mon = cxm - 150, cxm + 150
-    box(x_ra, y_mid, bw, bh, "RAs", "one floor each; worship, study hall, room check")
-    box(x_mon, y_mid, bw, bh, "Monitors", "front desk; supervise work periods")
+    box(x_ra, y_mid, bw, bh, "RAs", "one floor each: worship, study hall and room checks")
+    box(x_mon, y_mid, bw, bh, "Monitors", "front desk; the Dean's eyes when the Dean is away; supervise the janitors when assigned")
     box(x_mon, y_jan, bw, bh, "Janitors", "clean the dorm during work periods")
     c.setLineWidth(1)
     arrow(c, cxm, y_hra + bh / 2, cxm, y_dean - bh / 2)
@@ -303,47 +306,52 @@ def org_chart_page(c, page_no, total):
     arrow(c, x_ra, yb, x_ra, y_mid + bh / 2)
     arrow(c, x_mon, yb, x_mon, y_mid + bh / 2)
     arrow(c, x_mon, y_mid - bh / 2, x_mon, y_jan + bh / 2)
+    c.setFont(FI, 7.5)
+    c.drawRightString(x_mon - 5, y_mid - bh / 2 - 9, "when the Dean assigns")
+    c.drawRightString(x_mon - 5, y_mid - bh / 2 - 18, "that Monitor to the period")
     # dashed: Head RA audits janitors' cleaning
     c.setDash([3, 2.5]); c.setLineWidth(0.8)
-    c.line(cxm - bw / 2, y_hra - 6, cxm - 110, y_hra - 6)
-    c.line(cxm - 110, y_hra - 6, cxm - 110, y_jan)
+    c.line(cxm - bw / 2, y_hra - 8, cxm - 110, y_hra - 8)
+    c.line(cxm - 110, y_hra - 8, cxm - 110, y_jan)
     arrow(c, cxm - 110, y_jan, x_mon - bw / 2, y_jan)
-    c.setFont(FI, 7.5)
-    c.drawString(cxm - 108, y_jan + 4, "audits the cleaning")
-    # dashed: Deans <-> Monitors (watch the dorm when the Dean is away)
-    c.line(cxm + bw / 2, y_dean - 6, x_mon + bw / 2 + 24, y_dean - 6)
-    c.line(x_mon + bw / 2 + 24, y_dean - 6, x_mon + bw / 2 + 24, y_mid)
-    arrow(c, x_mon + bw / 2 + 24, y_mid, x_mon + bw / 2, y_mid)
-    c.saveState(); c.translate(x_mon + bw / 2 + 36, y_mid + 16); c.rotate(90)
-    c.drawString(0, 0, "watch the dorm when the Dean is away"); c.restoreState()
+    c.drawString(cxm - 106, y_jan + 4, "audits the cleaning")
+    # dashed: Deans check the janitors themselves when no Monitor is assigned (down the right side)
+    xr = x_mon + bw / 2 + 22
+    c.line(cxm + bw / 2, y_dean - 10, xr, y_dean - 10)
+    c.line(xr, y_dean - 10, xr, y_jan + 6)
+    arrow(c, xr, y_jan + 6, x_mon + bw / 2, y_jan + 6)
+    c.saveState(); c.translate(xr + 11, y_jan + 16); c.rotate(90)
+    c.drawString(0, 0, "check the janitors when no Monitor is assigned"); c.restoreState()
     c.setDash([]); c.setLineWidth(1)
 
-    # legend
-    ly = y_jan - 48
+    # legend, two by two
+    ly = y_jan - 44
     c.setFont(FB, 9); c.drawString(M, ly, "Reading the flowcharts")
-    ly -= 16
+    ly -= 14
     items = [
-        ("start", "Start / end of a shift or routine"),
+        ("start", "Start or end of a shift or routine"),
         ("step", "A task block: the heading is the job, the bullets are what \"done\" means"),
         ("decision", "A question. Follow \"Yes\" to the right, \"No\" straight down"),
         ("note", "A standing rule that applies the whole time, not a step in the sequence"),
     ]
-    x = M
-    for kind, desc in items:
+    half = (PAGE_W - 2 * M) / 2
+    row_h = 50
+    for i, (kind, desc) in enumerate(items):
+        x = M + (i % 2) * half
+        yy = ly - (i // 2) * row_h
         n = Node(kind, {"start": "Start", "step": "Task", "decision": "Question?", "note": "Rule"}[kind])
-        w = 70
+        w = 72
         h = measure(n, w) if kind != "step" else 24
         if kind == "step":
-            c.rect(x, ly - h + 4, w, h, stroke=1, fill=0)
-            c.setFont(FB, 9); c.drawCentredString(x + w / 2, ly - 8, "Task")
+            c.rect(x, yy - h + 4, w, h, stroke=1, fill=0)
+            c.setFont(FB, 9); c.drawCentredString(x + w / 2, yy - 8, "Task")
         else:
-            draw_node(c, n, x, ly + 4, w, h)
-        c.setFont(F, 8.5)
-        c.drawString(x + w + 8, ly - 8, desc)
-        ly -= max(h, 30) + 6
+            draw_node(c, n, x, yy + 4, w, h)
+        text_block(c, x + w + 8, yy + 2, half - w - 16, simpleSplit(desc, F, 8.5, half - w - 16), F, 8.5, 10.5)
+    ly -= 2 * row_h
 
     # quick reference table
-    ty = ly - 10
+    ty = ly - 4
     c.setFont(FB, 9); c.drawString(M, ty, "Quick reference")
     ty -= 10
     rows = [
@@ -351,8 +359,8 @@ def org_chart_page(c, page_no, total):
         ("Deans", "Run Ryan Hall: roster, rooms, RAs, check times, the signed paper sheet, discipline, drills. Final say on everything.", "School"),
         ("Head RA", "Night facilities check; organize the RAs; make sure Monitors and janitors do their jobs; whatever app switches the Deans turn on.", "Deans"),
         ("RAs", "Worship, study hall and room checks on their floor, in the app; peace, safety and well-being of their boys.", "Head RA, Deans"),
-        ("Monitors", "Front desk: packages, visitors, sign-in, lobby. During work periods: supervise the janitors.", "Head RA, Deans"),
-        ("Janitors", "Keep the dorm clean: washrooms, floors, garbage, anything that needs cleaning.", "Monitor on duty"),
+        ("Monitors", "Front desk: packages, visitors, sign-in, lobby. If the Dean assigns it, supervise the janitors during the work period as well.", "Head RA, Deans"),
+        ("Janitors", "Keep the dorm clean: washrooms, floors, garbage, anything that needs cleaning.", "The Monitor the Dean assigned, or the Dean"),
     ]
     col = [M, M + 70, PAGE_W - M - 90]
     widths = [66, col[2] - col[1] - 8, 86]
@@ -370,7 +378,7 @@ def org_chart_page(c, page_no, total):
         if i > 0:
             c.line(M, ty - rh, PAGE_W - M, ty - rh)
         ty -= rh
-    c.rect(M, ty, PAGE_W - 2 * M, (ly - 20) - ty, stroke=1, fill=0)
+    c.rect(M, ty, PAGE_W - 2 * M, (ly - 14) - ty, stroke=1, fill=0)
 
 
 def timeline_page(c, page_no, total):
@@ -383,9 +391,10 @@ def timeline_page(c, page_no, total):
     roles = ["Janitors", "Monitors", "RAs", "Head RA", "Deans"]
     rows = [
         ("Work period\n(afternoon)",
-         ["Clean: washrooms, floors, garbage. Report done to the Monitor.",
-          "Supervise the janitors: who showed up, is the work actually done. Sign off.",
-          "", "Every so often: audit the cleaning against what was signed off.", ""]),
+         ["Clean: washrooms, floors, garbage. Report done to whoever the Dean put in charge.",
+          "Desk as usual. If the Dean assigned you to the janitors: supervise them as well, and sign off the work.",
+          "", "Every so often: audit the cleaning against what was signed off.",
+          "Assign a Monitor to the work period, or check the janitors yourself."]),
         ("Evening\n(before 7:30)",
          ["", "Desk shift: lobby, packages, visitors sign in, sign-out sheet.",
           "On your floor. 7:20 PM: phone reminder for worship.",
@@ -409,7 +418,7 @@ def timeline_page(c, page_no, total):
           "Receive the Head RA's report. Print tonight's sheet, sign it, file it."]),
     ]
     tw = PAGE_W - 2 * M
-    time_w = 72
+    time_w = 82
     col_w = (tw - time_w) / len(roles)
     # header row
     hh = 20
@@ -463,7 +472,7 @@ def roles_pdf(path):
 
     # ---- Janitors
     janitors = [
-        Node("start", "Work period begins. Sign in with the Monitor on duty."),
+        Node("start", "Work period begins. Sign in with whoever the Dean put in charge of the period: the assigned Monitor, or the Dean."),
         Node("step", "Washrooms: top, middle and bottom floors", items=[
             "Refill the toilet paper in every stall.",
             "Unclog any blocked toilet.",
@@ -496,32 +505,23 @@ def roles_pdf(path):
                  "If it is dirty, it is a janitor's job.",
                  "Not sure how, or where the supplies are? Ask the Monitor.",
              ])),
-        Node("step", "Report to the Monitor on duty", items=[
-            "Walk the Monitor through what was done.",
+        Node("step", "Report to the assigned Monitor, or the Dean", items=[
+            "Walk them through what was done.",
             "Report anything broken or running low (toilet paper, soap, cleaning supplies) so the Head RA can restock it.",
         ]),
-        Node("end", "Monitor signs off on the work period."),
+        Node("end", "The assigned Monitor, or the Dean, signs off on the work period."),
     ]
-    draw_flow_page(c, "Janitors", "the Monitor on duty during the work period. The Head RA audits the cleaning.",
+    draw_flow_page(c, "Janitors", "the Monitor the Dean assigned to the work period; the Dean when none is. The Head RA audits.",
                    None, janitors, 3, total,
                    intro="The janitors keep the dorm clean. A work period is not finished when the time is up; it is "
-                         "finished when the Monitor has checked the work.")
+                         "finished when whoever the Dean put in charge has checked the work.")
     c.showPage()
 
     # ---- Monitors
     monitors = [
         Node("start", "Monitor shift begins. Sign in at the monitor desk."),
-        Node("decision", "Is this a work period?", join_after=3,
-             side=Node("step", "Supervise the janitors", items=[
-                 "Confirm every scheduled janitor shows up, on time. Write down who did not.",
-                 "Confirm each janitor knows their tasks for the period.",
-                 "When they report done, check it yourself: toilet paper refilled, toilets unclogged, urinals fixed, washrooms clean, floors vacuumed and mopped, garbage out.",
-                 "Do not sign off until the work is actually done.",
-                 "Report no-shows and unfinished work to the Head RA.",
-             ])),
         Node("step", "Lobby and front desk", items=[
-            "Keep the lobby clean and organized.",
-            "Keep the lobby noise down.",
+            "Keep the lobby clean and organized, and keep the noise down.",
             "Receive packages and food orders and get them to the right person.",
             "Keep the desk papers and the sign-out sheet in order.",
         ]),
@@ -535,6 +535,17 @@ def roles_pdf(path):
             "Note problems: noise, rowdiness, damage, people where they should not be.",
             "You can reach the Dean on duty and the Head RA by phone at any time.",
         ]),
+        Node("decision", "Work period, and the Dean assigned you to supervise the janitors?", join_after=1,
+             side=Node("step", "Supervise the janitors as well as the desk", items=[
+                 "On top of the desk job, not instead of it.",
+                 "Every scheduled janitor shows up on time and knows their tasks. Write down who did not show.",
+                 "When they report done, check it yourself: toilet paper, toilets, urinals, washrooms, floors vacuumed and mopped, garbage out.",
+                 "Do not sign off until it is actually done. Report no-shows and unfinished work to the Head RA.",
+             ])),
+        Node("step", "Not assigned to the janitors", items=[
+            "Carry on with the desk. The Deans check the janitors themselves during that work period.",
+            "Not sure whether you were assigned? Ask the Dean before the work period starts.",
+        ]),
         Node("decision", "A problem you cannot handle from the desk?",
              side=Node("step", "Escalate", items=[
                  "Call the Dean on duty.",
@@ -543,10 +554,11 @@ def roles_pdf(path):
              ])),
         Node("end", "Shift ends. Hand over to the next Monitor and note anything unusual."),
     ]
-    draw_flow_page(c, "Monitors", "the Head RA, and the Dean on duty.", "the janitors during work periods",
+    draw_flow_page(c, "Monitors", "the Head RA, and the Dean on duty.", "the janitors, when the Dean assigns it",
                    monitors, 4, total,
-                   intro="A Monitor's job depends on the shift. During a work period the Monitor supervises the "
-                         "janitors. On every other shift the Monitor runs the front desk and watches the dorm.")
+                   intro="Every Monitor shift is the front desk. Supervising the janitors during a work period is "
+                         "something the Dean assigns to a particular Monitor, and it is added to the desk job, not "
+                         "swapped for it. When no Monitor is assigned, the Deans check the janitors themselves.")
     c.showPage()
 
     # ---- RAs
@@ -668,7 +680,7 @@ def roles_pdf(path):
         ]),
         Node("end", "Night ends."),
     ]
-    draw_flow_page(c, "Head RA: the nightly routine", "the Deans.", "the RAs, the Monitors and, through them, the janitors",
+    draw_flow_page(c, "Head RA: the nightly routine", "the Deans.", "the RAs, the Monitors and the janitors' work",
                    hra_night, 7, total,
                    intro="The Head RA is the Deans' second set of eyes. Every night: make sure the RAs did their checks, "
                          "walk the facilities, log what is wrong, and report to the Dean.")
@@ -693,7 +705,7 @@ def roles_pdf(path):
         ])),
         Node("step", "Supervise the Monitors", items=[
             "Monitors are at the desk for their shifts and the sign-in rules are enforced.",
-            "During work periods: the Monitors are actually watching the janitors and checking the work, not just signing it off.",
+            "During work periods: a Monitor the Dean assigned to the janitors is actually watching them and checking the work, not just signing it off, while still running the desk.",
         ]),
         Node("step", "Audit the cleaning", items=[
             "Every so often, walk the dorm yourself: washrooms, floors, lobby, garbage.",
@@ -712,7 +724,7 @@ def roles_pdf(path):
         ]),
         Node("end", "Report to the Deans."),
     ]
-    draw_flow_page(c, "Head RA: organizing the team", "the Deans.", "the RAs, the Monitors and, through them, the janitors",
+    draw_flow_page(c, "Head RA: organizing the team", "the Deans.", "the RAs, the Monitors and the janitors' work",
                    hra_team, 8, total,
                    intro="Beyond the nightly check, the Head RA keeps the whole staff working: RAs doing their checks, "
                          "Monitors watching the janitors, and the dorm actually getting cleaned.")
@@ -742,6 +754,7 @@ def roles_pdf(path):
                  "What happens next is the Deans' call.",
              ])),
         Node("step", "Ongoing", items=[
+            "Work periods: assign a Monitor to supervise the janitors, or check the janitors yourself.",
             "Leave board: sign boys out ahead of time so they show Away on every check in the range.",
             "Room moves, boys and RAs added or removed mid-year. Approve each new phone an RA signs in on.",
             "Reopen a submitted check only to fix a mistake; every edit is logged with a name and time.",
@@ -800,11 +813,12 @@ def annotate_aerial(src, dst):
 
     # The RA row: along the front of the parking stalls, parallel to the dorm, starting at the can
     # and going left (as you face the dorm). 10 ft apart; the photo is about 13 px per foot.
+    # Both Grade 12 RAs share the fourth spot; the Grade 12s make one line.
     row_y = 1540
     step = 130
     r = 50
-    xs = [gx - i * step for i in range(5)]
-    labels = ["9", "10", "11", "12", "12"]
+    xs = [gx - i * step for i in range(4)]
+    labels = ["9", "10", "11", "12"]
     d.line([(xs[0], row_y), (xs[-1], row_y)], fill="black", width=10)
     d.line([(xs[0], row_y), (xs[-1], row_y)], fill="white", width=4)
     # short tick from the can down to the Grade 9 RA
@@ -820,10 +834,12 @@ def annotate_aerial(src, dst):
             d.rectangle((x - 20, sy - 20, x + 20, sy + 20), fill="white", outline="black", width=4)
         d.ellipse((x - r, row_y - r, x + r, row_y + r), fill="white", outline="black", width=7)
         d.text((x, row_y + 2), label, font=big, fill="black", anchor="mm")
+    outlined((xs[-1], row_y - r - 14), "2 RAs", med, anchor="mb")
     # labels
     outlined((xs[-1] - r - 20, row_y), "RAs", big, anchor="rm")
-    outlined((xs[2], col_bottom + 60), "RAs face the dorm, 10 ft apart", med, anchor="mm")
-    outlined((xs[2], col_bottom + 108), "Students line up behind their RA", med, anchor="mm")
+    cx_label = (xs[0] + xs[-1]) / 2
+    outlined((cx_label, col_bottom + 60), "RAs face the dorm, 10 ft apart", med, anchor="mm")
+    outlined((cx_label, col_bottom + 108), "Students line up behind their RA", med, anchor="mm")
     im.save(dst, quality=90)
     return im.size
 
@@ -862,7 +878,7 @@ def fire_pdf(path, aerial_src):
         "Walk. Do not run, push or talk. Keep your phone away so you can hear instructions.",
         "Smoke: stay low and cover your mouth. Before opening a closed door, feel it with the back of your hand. If it is hot, use the other exit.",
         "Outside, move away from the building and go straight to the muster point: the parking lot across Kingsway College Dr, in front of the parking spaces by the garbage can (see page 4).",
-        "Find your grade's RA and line up behind them. Grade 9 is at the garbage can, then 10, 11, 12, 12 to the left as you face the dorm. Answer the roll call.",
+        "Find your grade's RA and line up behind them. Grade 9 is at the garbage can, then 10, 11 and 12 to the left as you face the dorm. All Grade 12s make one line; both Grade 12 RAs stand at that spot. Answer the roll call.",
         "Stay at the muster point. Nobody goes back into the building until the Dean gives the all-clear.",
         "If you think someone is still inside, tell your RA or the Dean. Never go back in to look.",
     ]
@@ -871,7 +887,7 @@ def fire_pdf(path, aerial_src):
     c.setFont(FB, 12); c.drawString(M, y, "Who does what"); y -= 12
     rows = [
         ("RAs", "Go straight outside to your grade's spot in front of the parking spaces, facing the dorm. Line your grade up behind you, take the roll against your floor list, and report the count (and any missing name) to the Head RA. Keep your grade together and quiet until the all-clear."),
-        ("Head RA", "Sweep the building with the Deans: every room, washroom and common area on all three floors. Exit last. At the muster point, collect the counts from the five RAs and report \"all clear\" or the missing names to the Dean."),
+        ("Head RA", "Sweep the building with the Deans: every room, washroom and common area on all three floors. Exit last. At the muster point, collect the four grade counts from the RAs and report \"all clear\" or the missing names to the Dean."),
         ("Deans", "Lead the drill. Sweep the floors with the Head RA, meet the fire department if it is a real alarm, decide when the all-clear is given, and account for every person using the RAs' counts."),
         ("Monitors", "If you are at the desk: bring the visitor sign-in sheet with you, leave by the lobby, and report to the Dean at the muster point who was signed in. Visitors line up with the Monitor."),
         ("Janitors and everyone else", "Stop work at once, leave by the nearest fire door, line up with your grade."),
@@ -913,7 +929,7 @@ def fire_pdf(path, aerial_src):
     cols = [
         [Node("step", "Alarm sounds"),
          Node("step", "Leave by the nearest fire door", items=["Do not sweep rooms. Your job is outside."]),
-         Node("step", "Go to your grade's spot", items=["In front of the parking spaces, facing the dorm. Grade 9 at the garbage can, then 10, 11, 12, 12 to the left."]),
+         Node("step", "Go to your grade's spot", items=["In front of the parking spaces, facing the dorm. Grade 9 at the garbage can, then 10, 11, 12 to the left. Both Grade 12 RAs at the 12 spot."]),
          Node("step", "Line your grade up behind you and take the roll", items=["Check against your floor list."]),
          Node("step", "Report the count to the Head RA", items=["Name anyone missing and where they were last seen."]),
          Node("step", "Hold your grade at the spot", items=["Quiet, together, until the all-clear."])],
@@ -921,7 +937,7 @@ def fire_pdf(path, aerial_src):
          Node("step", "Sweep all three floors", items=["Every room, washroom and common area.", "Knock, open, look, close the door."]),
          Node("step", "Send stragglers to the nearest fire door"),
          Node("step", "Exit last, confirm the building is empty"),
-         Node("step", "Head RA collects the five RA counts"),
+         Node("step", "Head RA collects the four grade counts"),
          Node("decision", "Everyone accounted for?"),
          Node("step", "Dean gives the all-clear", items=["Or tells the fire department who is missing and where."])],
         [Node("step", "Alarm sounds"),
@@ -988,7 +1004,7 @@ def fire_pdf(path, aerial_src):
         # hallway
         hy = top - bh / 2 - 2
         c.setDash([2, 2]); c.line(bx + 12, hy, bx + bw - 12, hy); c.setDash([])
-        c.setFont(FI, 7.5); c.drawString(bx + 16, hy + 3, "hallway")
+        c.setFont(FI, 7.5); c.drawString(bx + 16, hy - 10, "hallway")
         if main:
             lx = bx + 12 + 4 * rw + 2
             c.rect(lx, top - 18 - 22, 2 * rw - 4, 22, stroke=1, fill=0)
@@ -1026,9 +1042,10 @@ def fire_pdf(path, aerial_src):
     header(c, "Muster point: the lot across the road", K, 4, total)
     y = PAGE_H - M - 50
     intro = ("Aerial view of Ryan Hall and the parking lot across Kingsway College Dr. The garbage can at the end of "
-             "the parking spaces is the anchor. The five RAs stand in a row in front of the parking spaces, facing the "
-             "dorm, about 10 feet apart: Grade 9 at the can, then 10, 11, 12 and 12 to the left. Each grade lines up "
-             "behind its RA, away from the dorm. Nobody stands in the parking stalls or on the road.")
+             "the parking spaces is the anchor. The RAs stand in a row in front of the parking spaces, facing the "
+             "dorm, about 10 feet apart: Grade 9 at the can, then 10, 11 and 12 to the left. Both Grade 12 RAs share "
+             "the 12 spot. Each grade lines up in one line behind its RA, away from the dorm. Nobody stands in the "
+             "parking stalls or on the road.")
     y = text_block(c, M, y, PAGE_W - 2 * M, simpleSplit(intro, F, 9.5, PAGE_W - 2 * M), F, 9.5, 12) - 10
     avail_h = y - (M + 26)
     scale = min((PAGE_W - 2 * M - 150) / img_w, avail_h / img_h)
@@ -1064,7 +1081,7 @@ def fire_pdf(path, aerial_src):
         ly -= max(len(lines) * 10.5, 14) + 10
     ly -= 6
     c.setFont(FB, 9); c.drawString(lx, ly, "Order from the can, going left"); ly -= 14
-    for g in ["1.  Grade 9 RA (at the can)", "2.  Grade 10 RA", "3.  Grade 11 RA", "4.  Grade 12 RA (A)", "5.  Grade 12 RA (B)"]:
+    for g in ["1.  Grade 9 RA (at the can)", "2.  Grade 10 RA", "3.  Grade 11 RA", "4.  Grade 12, both RAs, one line"]:
         c.setFont(F, 9); c.drawString(lx + 4, ly, g); ly -= 13
     ly -= 8
     note = ("\"Left\" means left as you stand in the lot facing the dorm. The photo was taken on a different day; cars "
@@ -1077,7 +1094,8 @@ def fire_pdf(path, aerial_src):
     y = PAGE_H - M - 50
     intro = ("Not to scale. You are looking down at the lot with the dorm at the top. The RAs stand in a row in front "
              "of the parking spaces, facing the dorm, about 10 feet apart: Grade 9 at the garbage can and the rest to the "
-             "left. Each grade stands in a single line behind its RA, so the RA turns around and takes the roll down the line.")
+             "left. Both Grade 12 RAs stand at the 12 spot and all Grade 12s make one line. Each grade stands in a single "
+             "line behind its RA, so the RA turns around and takes the roll down the line.")
     y = text_block(c, M, y, PAGE_W - 2 * M, simpleSplit(intro, F, 9.5, PAGE_W - 2 * M), F, 9.5, 12) - 14
     # schematic frame
     fx, fw = M, PAGE_W - 2 * M
@@ -1103,25 +1121,33 @@ def fire_pdf(path, aerial_src):
     c.setFont(FB, 8); c.drawString(gx + 12, gy - 3, "GARBAGE CAN"); c.setFont(F, 7.5); c.drawString(gx + 12, gy - 13, "(anchor)")
     # RA row in front of the stalls, Grade 9 under the can, the rest to the left
     row_y = y - 40 - stall_h - 34
-    spacing = 70
-    grades = [("9", "Grade 9"), ("10", "Grade 10"), ("11", "Grade 11"), ("12", "Grade 12 (A)"), ("12", "Grade 12 (B)")]
-    xs = [gx - i * spacing for i in range(5)]
+    spacing = 84
+    grades = [("9", "Grade 9"), ("10", "Grade 10"), ("11", "Grade 11"), ("12", "Grade 12 (one line)")]
+    xs = [gx - i * spacing for i in range(4)]
     c.setLineWidth(1); c.setDash([3, 3]); c.line(gx, gy + 7, gx, row_y + 12); c.line(xs[-1], row_y, xs[0], row_y); c.setDash([])
     # "facing the dorm" arrow
-    arrow(c, xs[-1] - 46, row_y - 10, xs[-1] - 46, row_y + 26)
-    c.setFont(FI, 7); c.drawCentredString(xs[-1] - 46, row_y - 20, "RAs face"); c.drawCentredString(xs[-1] - 46, row_y - 29, "the dorm")
+    arrow(c, xs[-1] - 60, row_y - 12, xs[-1] - 60, row_y + 14)
+    c.setFont(FI, 7); c.drawCentredString(xs[-1] - 60, row_y - 23, "RAs face"); c.drawCentredString(xs[-1] - 60, row_y - 32, "the dorm")
     for i, (x, (g, name)) in enumerate(zip(xs, grades)):
         # the grade's students in a single line behind the RA
         for k in range(9):
             sy = row_y - 30 - k * 16
             c.setLineWidth(0.7); c.rect(x - 4, sy - 4, 8, 8, stroke=1, fill=0)
         c.setLineWidth(1.5); c.setFillColorRGB(*WHITE)
-        c.circle(x, row_y, 12, stroke=1, fill=1)
-        c.setFillColorRGB(*BLACK)
-        c.setFont(FB, 10); c.drawCentredString(x, row_y - 3.5, g)
+        if g == "12":
+            # both Grade 12 RAs at the one spot
+            c.circle(x - 9, row_y, 12, stroke=1, fill=1)
+            c.circle(x + 9, row_y, 12, stroke=1, fill=1)
+            c.setFillColorRGB(*BLACK)
+            c.setFont(FB, 10); c.drawCentredString(x - 9, row_y - 3.5, g); c.drawCentredString(x + 9, row_y - 3.5, g)
+            c.setFont(FI, 7); c.drawCentredString(x, row_y + 16, "2 RAs")
+        else:
+            c.circle(x, row_y, 12, stroke=1, fill=1)
+            c.setFillColorRGB(*BLACK)
+            c.setFont(FB, 10); c.drawCentredString(x, row_y - 3.5, g)
         c.setFont(FB, 7.5); c.drawCentredString(x, row_y - 30 - 9 * 16 + 2, name)
         c.setFont(F, 7); c.drawCentredString(x, row_y - 30 - 9 * 16 - 8, "students")
-        if i < 4:
+        if i < 3:
             c.setFont(FI, 7); c.drawCentredString((x + xs[i + 1]) / 2, row_y + 16, "10 ft")
     c.setFont(F, 8); c.drawString(fx + 6, y - fh + 8, "open parking lot (rest of the lot)")
     # RA assignment table
@@ -1130,7 +1156,7 @@ def fire_pdf(path, aerial_src):
     c.setLineWidth(0.6)
     heads = ["Position", "Grade", "RA name", "Floor they cover", "Backup if that RA is away"]
     cw = [52, 44, 150, 110, PAGE_W - 2 * M - 356]
-    rows2 = [("1 (at can)", "9"), ("2 (left)", "10"), ("3", "11"), ("4", "12"), ("5 (far left)", "12")]
+    rows2 = [("1 (at can)", "9"), ("2 (left)", "10"), ("3", "11"), ("4 (far left)", "12"), ("4 (far left)", "12")]
     rh = 20
     x = M
     c.setFillColorRGB(*BLACK); c.rect(M, ty - rh, PAGE_W - 2 * M, rh, stroke=0, fill=1); c.setFillColorRGB(*WHITE)
