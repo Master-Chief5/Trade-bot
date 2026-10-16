@@ -3,8 +3,9 @@
 Two printable PDFs for the dorm, generated from `make_docs.py`:
 
 - `Ryan-Hall-Roles-and-Responsibilities.pdf` — black-and-white flowcharts, one per role
-  (Janitors, Monitors, RAs, Head RA), plus a who-reports-to-whom chart and a quick-reference table.
-- `Ryan-Hall-Fire-Drill-Plan.pdf` — what everyone does when the alarm sounds, who does what,
+  (Janitors, Monitors, RAs, Head RA, Deans), plus a who-reports-to-whom chart, a school-night timeline and
+  a page on doing a check in the app.
+- `Ryan-Hall-Fire-Drill-Plan.pdf` — black and white. What everyone does when the alarm sounds, who does what,
   the fire doors on all three floors, the muster point on an aerial photo, and the grade lineup
   with an RA assignment table to fill in.
 

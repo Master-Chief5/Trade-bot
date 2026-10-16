@@ -348,9 +348,9 @@ def org_chart_page(c, page_no, total):
     ty -= 10
     rows = [
         ("Role", "Core job in one line", "Answers to"),
-        ("Deans", "Run Ryan Hall. Set the rules, handle discipline, lead drills, receive every report.", "School"),
-        ("Head RA", "Night facilities check; organize the RAs; make sure Monitors and janitors do their jobs.", "Deans"),
-        ("RAs", "Worship, study hall and room checks on their floor; peace, safety and well-being of their boys.", "Head RA, Deans"),
+        ("Deans", "Run Ryan Hall: roster, rooms, RAs, check times, the signed paper sheet, discipline, drills. Final say on everything.", "School"),
+        ("Head RA", "Night facilities check; organize the RAs; make sure Monitors and janitors do their jobs; whatever app switches the Deans turn on.", "Deans"),
+        ("RAs", "Worship, study hall and room checks on their floor, in the app; peace, safety and well-being of their boys.", "Head RA, Deans"),
         ("Monitors", "Front desk: packages, visitors, sign-in, lobby. During work periods: supervise the janitors.", "Head RA, Deans"),
         ("Janitors", "Keep the dorm clean: washrooms, floors, garbage, anything that needs cleaning.", "Monitor on duty"),
     ]
@@ -373,14 +373,92 @@ def org_chart_page(c, page_no, total):
     c.rect(M, ty, PAGE_W - 2 * M, (ly - 20) - ty, stroke=1, fill=0)
 
 
+def timeline_page(c, page_no, total):
+    """A school night, Sunday to Thursday, as a grid of roles by time."""
+    header(c, "A school night at a glance", "RYAN HALL  •  ROLES & RESPONSIBILITIES", page_no, total)
+    y = PAGE_H - M - 50
+    intro = ("Sunday to Thursday. The check times and deadlines are the app's defaults; the Deans set the real ones "
+             "under Settings. Read down a column for one role's night, or across a row for who is doing what at that time.")
+    y = text_block(c, M, y, PAGE_W - 2 * M, simpleSplit(intro, F, 9.5, PAGE_W - 2 * M), F, 9.5, 12) - 12
+    roles = ["Janitors", "Monitors", "RAs", "Head RA", "Deans"]
+    rows = [
+        ("Work period\n(afternoon)",
+         ["Clean: washrooms, floors, garbage. Report done to the Monitor.",
+          "Supervise the janitors: who showed up, is the work actually done. Sign off.",
+          "", "Every so often: audit the cleaning against what was signed off.", ""]),
+        ("Evening\n(before 7:30)",
+         ["", "Desk shift: lobby, packages, visitors sign in, sign-out sheet.",
+          "On your floor. 7:20 PM: phone reminder for worship.",
+          "Confirm every RA is on their floor.", "Leave board up to date so boys on leave show Away."]),
+        ("7:30 PM\nWorship (W)",
+         ["", "Desk.", "Worship check in the app. Submit by 7:50.",
+          "RA missing or late? Cover or reassign, tell the Dean.",
+          "Tonight screen: which floors are in. Late floor: nudge the RA."]),
+        ("8:30 PM\nStudy hall (SH)",
+         ["", "Desk. Keep the lobby quiet.", "Study hall check. Submit by 8:50.",
+          "Spot-check the floors.", "Alert if a floor misses its deadline."]),
+        ("10:00 PM\nRoom check (RC)",
+         ["", "Desk until the end of the shift; hand over.",
+          "Room check: every boy in his room. Submit by 10:20. Then sign the day.",
+          "Collect each RA's lates and dirty rooms.",
+          "10:30 PM summary: floors checked, boys absent."]),
+        ("After checks",
+         ["", "Note anything unusual for the Head RA.",
+          "Report lates and dirty rooms to the Head RA. Settle the floor.",
+          "Night facilities check: lobby, desk, closets, kitchen, laundry, bathrooms, supplies. Check in with the Dean.",
+          "Receive the Head RA's report. Print tonight's sheet, sign it, file it."]),
+    ]
+    tw = PAGE_W - 2 * M
+    time_w = 72
+    col_w = (tw - time_w) / len(roles)
+    # header row
+    hh = 20
+    c.setFillColorRGB(*BLACK); c.rect(M, y - hh, tw, hh, stroke=0, fill=1)
+    c.setFillColorRGB(*WHITE); c.setFont(FB, 9)
+    c.drawString(M + 5, y - 13, "Time")
+    for i, r in enumerate(roles):
+        c.drawCentredString(M + time_w + col_w * (i + 0.5), y - 13, r)
+    c.setFillColorRGB(*BLACK)
+    y -= hh
+    c.setLineWidth(0.6)
+    fs, lead = 8, 9.8
+    for label, cells in rows:
+        wrapped = [simpleSplit(t, F, fs, col_w - 10) if t else [] for t in cells]
+        lab = label.split("\n")
+        rh = max(max(len(w) for w in wrapped), len(lab)) * lead + 10
+        c.rect(M, y - rh, tw, rh, stroke=1, fill=0)
+        c.setFont(FB, 8.5)
+        for k, ln in enumerate(lab):
+            c.drawString(M + 5, y - 12 - k * 10.5, ln)
+        for i, w in enumerate(wrapped):
+            x = M + time_w + col_w * i
+            c.line(x, y, x, y - rh)
+            if w:
+                text_block(c, x + 5, y - 4, col_w - 10, w, F, fs, lead)
+            else:
+                c.setFont(FI, 7.5); c.drawCentredString(x + col_w / 2, y - rh / 2 - 2, "—")
+        y -= rh
+    y -= 16
+    c.setFont(FB, 10); c.drawString(M, y, "What the app does on its own"); y -= 6
+    auto = [
+        "Reminds the RA on duty 10 minutes before worship and study hall and 15 minutes before room check.",
+        "Nudges the RA and alerts the Dean (and the Head RA, if that switch is on) when a floor is not submitted 20 minutes after check time.",
+        "Marks boys on the leave board Away before the RA starts, locks a check when it is submitted, and logs every reopening with a name and time.",
+        "Compiles the week's checks into the school's paper check sheet (W, SH, RC columns, one block per day) with each RA's drawn signature on their day.",
+    ]
+    bullets(c, M, y, tw, auto, size=9, leading=11.2)
+
+
 def roles_pdf(path):
     c = canvas.Canvas(path, pagesize=letter)
     c.setTitle("Ryan Hall: Roles and Responsibilities")
     c.setAuthor("Ryan Hall, Kingsway College")
-    total = 6
+    total = 9
 
     # ---- cover / org chart
     org_chart_page(c, 1, total)
+    c.showPage()
+    timeline_page(c, 2, total)
     c.showPage()
 
     # ---- Janitors
@@ -425,7 +503,7 @@ def roles_pdf(path):
         Node("end", "Monitor signs off on the work period."),
     ]
     draw_flow_page(c, "Janitors", "the Monitor on duty during the work period. The Head RA audits the cleaning.",
-                   None, janitors, 2, total,
+                   None, janitors, 3, total,
                    intro="The janitors keep the dorm clean. A work period is not finished when the time is up; it is "
                          "finished when the Monitor has checked the work.")
     c.showPage()
@@ -466,7 +544,7 @@ def roles_pdf(path):
         Node("end", "Shift ends. Hand over to the next Monitor and note anything unusual."),
     ]
     draw_flow_page(c, "Monitors", "the Head RA, and the Dean on duty.", "the janitors during work periods",
-                   monitors, 3, total,
+                   monitors, 4, total,
                    intro="A Monitor's job depends on the shift. During a work period the Monitor supervises the "
                          "janitors. On every other shift the Monitor runs the front desk and watches the dorm.")
     c.showPage()
@@ -480,18 +558,18 @@ def roles_pdf(path):
                  "Know who is on your floor and who is missing.",
                  "Assist the Deans with whatever they need.",
              ])),
-        Node("step", "Worship check", sub="Default time 7:30 PM. The Deans set the real times.", items=[
-            "Take attendance of your floor at worship.",
-            "Mark each boy present, late or absent, and note why.",
+        Node("step", "Worship check", sub="Default time 7:30 PM, submit by 7:50. The Deans set the real times.", items=[
+            "Take attendance of your floor at worship, in the app.",
+            "Mark each boy present, late or absent. Late needs a note.",
         ]),
-        Node("step", "Study hall check", sub="Default time 8:30 PM.", items=[
+        Node("step", "Study hall check", sub="Default time 8:30 PM, submit by 8:50.", items=[
             "Confirm every boy on your floor is in study hall, quiet and on task.",
             "Record lates and absences.",
         ]),
-        Node("step", "Room check", sub="Default time 10:00 PM.", items=[
+        Node("step", "Room check", sub="Default time 10:00 PM, submit by 10:20.", items=[
             "Visit every room on your floor. Every boy in his own room and accounted for.",
             "Note lates, absences and dirty rooms.",
-            "Settle the floor for the night.",
+            "Settle the floor for the night. Then sign the day in the app (page 6).",
         ]),
         Node("decision", "Incident, rowdiness, or a boy you cannot find?",
              side=Node("step", "Handle it, then escalate", items=[
@@ -511,9 +589,51 @@ def roles_pdf(path):
         Node("end", "Night ends."),
     ]
     draw_flow_page(c, "RAs (Resident Assistants)", "the Head RA and the Deans.", "the boys on their floor",
-                   ras, 4, total,
+                   ras, 5, total,
                    intro="Each RA is responsible for one floor and, during drills, for one grade. The three checks "
                          "are the backbone of the night; the standing rules on the right apply the whole time.")
+    c.showPage()
+
+    # ---- RAs: doing a check in the app
+    ra_app = [
+        Node("start", "Your phone buzzes: the check on your floor starts in 10 minutes (15 for room check).",
+             side=Node("note", "Cannot make it tonight?", float=True, items=[
+                 "Hand the check over: tap Hand a check over, pick the floor and nights, and show the code to whoever is covering.",
+                 "They scan it with their camera, type their name, and get your floor for those nights. No account needed.",
+                 "Both names go on the check. Tell the Head RA.",
+             ])),
+        Node("step", "Open the app and tap Start check", items=[
+            "Your floor shows as a list grouped by room.",
+            "Everyone starts as Present. Boys the Deans signed out on the leave board already show Away.",
+        ]),
+        Node("step", "Tap only the exceptions", items=[
+            "Tap a boy to cycle Present, Absent, Away, Late. Tap his name for Infirmary or a note.",
+            "Late always needs a note: where he was and why.",
+            "A note is for the Deans (\"in shower, confirmed\", \"with Dean at office\").",
+        ]),
+        Node("step", "Tap Submit before the deadline", sub="Default: 20 minutes after the check time.", items=[
+            "The summary shows how many are present, absent and away.",
+            "Submit locks the check. A Dean, or the Head RA within 24 hours if allowed, can reopen it to fix a mistake. Every edit is logged.",
+            "No Wi-Fi in the hallway? It saves on your phone and uploads when the signal is back.",
+        ], side=Node("note", "Phone not an option?", items=[
+            "Print a blank sheet (your floor, current roster, empty boxes) and do the check on paper.",
+            "A Dean, or you if permitted, enters it from paper later. The record says so.",
+        ])),
+        Node("decision", "Missed the deadline?",
+             side=Node("step", "Nudge and escalation", items=[
+                 "A nudge lands on your home screen; the Dean gets an alert (and the Head RA, if that switch is on).",
+                 "Do the check now. Tell the Head RA why it was late.",
+             ])),
+        Node("step", "After the last check of the night: sign the day", items=[
+            "When every check due on your floor is in, draw your signature on your phone.",
+            "It prints on that day's line of the paper check sheet, which the Deans print and sign. Paper stays the record.",
+        ]),
+        Node("end", "Done for the night."),
+    ]
+    draw_flow_page(c, "RAs: doing a check in the app", "the Head RA and the Deans.", "the boys on their floor",
+                   ra_app, 6, total,
+                   intro="The app fills in the school's paper check sheet; the RA only taps the exceptions. "
+                         "Statuses: Present (P), Absent (A), Away (AW), Late (L), Infirmary (INF). The Deans can rename these.")
     c.showPage()
 
     # ---- Head RA, page 1: nightly
@@ -549,7 +669,7 @@ def roles_pdf(path):
         Node("end", "Night ends."),
     ]
     draw_flow_page(c, "Head RA: the nightly routine", "the Deans.", "the RAs, the Monitors and, through them, the janitors",
-                   hra_night, 5, total,
+                   hra_night, 7, total,
                    intro="The Head RA is the Deans' second set of eyes. Every night: make sure the RAs did their checks, "
                          "walk the facilities, log what is wrong, and report to the Dean.")
     c.showPage()
@@ -561,7 +681,16 @@ def roles_pdf(path):
             "Set the RA schedule and floor assignments.",
             "Make sure every check is done, on time, and done properly.",
             "Deal with RAs who skip checks or show up late. Repeat problems go to the Deans.",
-        ]),
+        ], side=Node("note", "In the app: switches the Deans can turn on", float=True, items=[
+            "See every floor.",
+            "Reopen a submitted check within 24 hours.",
+            "Assign RAs to floors.",
+            "Move a boy between rooms.",
+            "Add or remove RAs.",
+            "Print sheets for any floor.",
+            "Get the missed-check alerts.",
+            "All off until a Dean turns them on.",
+        ])),
         Node("step", "Supervise the Monitors", items=[
             "Monitors are at the desk for their shifts and the sign-in rules are enforced.",
             "During work periods: the Monitors are actually watching the janitors and checking the work, not just signing it off.",
@@ -569,9 +698,8 @@ def roles_pdf(path):
         Node("step", "Audit the cleaning", items=[
             "Every so often, walk the dorm yourself: washrooms, floors, lobby, garbage.",
             "Compare what you see with what the Monitor signed off.",
-        ], side=Node("note", "Why audit?", items=[
-            "The janitors answer to the Monitors, and the Monitors answer to you. The audit is how you know both layers are working.",
-        ])),
+            "The janitors answer to the Monitors and the Monitors answer to you; the audit is how you know both layers work.",
+        ]),
         Node("decision", "Does what you see match what was signed off?", yes="No", no="Yes",
              side=Node("step", "Address it", items=[
                  "Raise it with the Monitor and the janitors involved.",
@@ -585,16 +713,60 @@ def roles_pdf(path):
         Node("end", "Report to the Deans."),
     ]
     draw_flow_page(c, "Head RA: organizing the team", "the Deans.", "the RAs, the Monitors and, through them, the janitors",
-                   hra_team, 6, total,
+                   hra_team, 8, total,
                    intro="Beyond the nightly check, the Head RA keeps the whole staff working: RAs doing their checks, "
                          "Monitors watching the janitors, and the dorm actually getting cleaned.")
+    c.showPage()
+
+    # ---- Deans
+    deans = [
+        Node("start", "The year, start to finish.",
+             side=Node("note", "The paper sheet stays the record", float=True, items=[
+                 "The app fills in the school's check sheet; the Deans print it and sign it.",
+                 "Any RA or Dean can print a blank sheet when a phone is not an option.",
+             ])),
+        Node("step", "Before the year, once", items=[
+            "Set up the floors, rooms and roster in the app; name the Head RA and decide which switches are on.",
+            "Invite the RAs and assign each one a floor. Set the check times and the status words.",
+            "Print the recovery code and lock it away. Keep two Dean phones signed in.",
+        ]),
+        Node("step", "Every school night", items=[
+            "Tonight screen: which floors are checked, which are late, who is absent.",
+            "A floor is late? Tap Remind; it lands on that RA's home screen.",
+            "10:30 PM summary. Then the Head RA's report: lates, dirty rooms, facilities, staff.",
+            "Print tonight's sheet (one page per floor), sign it, file it.",
+        ]),
+        Node("decision", "A boy absent three checks in a row, or twice this week?",
+             side=Node("step", "Follow up", items=[
+                 "The app raises a quiet flag; it never applies a consequence.",
+                 "What happens next is the Deans' call.",
+             ])),
+        Node("step", "Ongoing", items=[
+            "Leave board: sign boys out ahead of time so they show Away on every check in the range.",
+            "Room moves, boys and RAs added or removed mid-year. Approve each new phone an RA signs in on.",
+            "Reopen a submitted check only to fix a mistake; every edit is logged with a name and time.",
+            "Discipline, parents, maintenance, and anything the Monitors or Head RA escalate.",
+        ]),
+        Node("step", "Fire drills", items=[
+            "Lead the drill, sweep all three floors with the Head RA, exit last, give the all-clear. See the Fire Drill Plan.",
+        ]),
+        Node("step", "End of year", items=[
+            "Year rollover: archive the roster and checks, keep the floors and rooms, clear the RA list. Archives stay printable.",
+        ]),
+        Node("end", "The Deans have the final say on everything in Ryan Hall."),
+    ]
+    draw_flow_page(c, "Deans", "the school.", "everyone in Ryan Hall",
+                   deans, 9, total,
+                   intro="Three Deans run the dorm. The app is theirs: they own the roster, the rooms, the staff list, the "
+                         "check times and the printed, signed sheet. Everything the other roles do reports up to them.")
     c.save()
 
 
 # --------------------------------------------------------------------------- fire drill document
 def annotate_aerial(src, dst):
     """Mark the evacuation route, the muster point and the five RA positions on the aerial photo."""
-    im = Image.open(src).convert("RGB")
+    # black and white, like the rest of the plan
+    im = Image.open(src).convert("L").convert("RGB")
     d = ImageDraw.Draw(im)
     big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 54)
     med = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
@@ -623,24 +795,35 @@ def annotate_aerial(src, dst):
     # garbage can = muster point anchor
     gx, gy = 937, 1406
     d.rectangle((gx - 28, gy - 28, gx + 28, gy + 28), fill="black", outline="white", width=4)
-    outlined((gx - 46, gy - 26), "Garbage can", med, anchor="rm")
-    outlined((gx - 46, gy + 16), "= muster point", med, anchor="rm")
+    outlined((gx + 44, gy - 22), "Garbage", med, anchor="lm")
+    outlined((gx + 44, gy + 22), "can", med, anchor="lm")
 
-    # five RA positions in a line away from the trees, 10 ft apart (scale is about 13 px per foot)
-    positions = [("9", 1520), ("10", 1650), ("11", 1780), ("12", 1910), ("12", 2040)]
-    d.line([(gx, gy + 32), (gx, 2070)], fill="black", width=10)
-    d.line([(gx, gy + 32), (gx, 2070)], fill="white", width=4)
+    # The RA row: along the front of the parking stalls, parallel to the dorm, starting at the can
+    # and going left (as you face the dorm). 10 ft apart; the photo is about 13 px per foot.
+    row_y = 1540
+    step = 130
     r = 50
-    for label, py in positions:
-        # grade line runs left from the RA, into the wide open part of the lot
-        d.line([(gx - r - 12, py), (gx - r - 300, py)], fill="black", width=16)
-        d.line([(gx - r - 12, py), (gx - r - 300, py)], fill="white", width=7)
-        outlined((gx - r - 20, py - 18), f"Grade {label} students", med, anchor="rb")
-        d.ellipse((gx - r, py - r, gx + r, py + r), fill="white", outline="black", width=7)
-        d.text((gx, py + 2), label, font=big, fill="black", anchor="mm")
-    outlined((gx + r + 18, 1690), "RAs", big, anchor="lm")
-    outlined((gx + r + 18, 1745), "10 ft", med, anchor="lm")
-    outlined((gx + r + 18, 1790), "apart", med, anchor="lm")
+    xs = [gx - i * step for i in range(5)]
+    labels = ["9", "10", "11", "12", "12"]
+    d.line([(xs[0], row_y), (xs[-1], row_y)], fill="black", width=10)
+    d.line([(xs[0], row_y), (xs[-1], row_y)], fill="white", width=4)
+    # short tick from the can down to the Grade 9 RA
+    d.line([(gx, gy + 32), (gx, row_y - r)], fill="black", width=10)
+    d.line([(gx, gy + 32), (gx, row_y - r)], fill="white", width=4)
+    col_bottom = row_y + 430
+    for x, label in zip(xs, labels):
+        # the grade's line of students, behind the RA (away from the dorm)
+        d.line([(x, row_y + r + 10), (x, col_bottom)], fill="black", width=16)
+        d.line([(x, row_y + r + 10), (x, col_bottom)], fill="white", width=7)
+        for k in range(5):
+            sy = row_y + r + 50 + k * 80
+            d.rectangle((x - 20, sy - 20, x + 20, sy + 20), fill="white", outline="black", width=4)
+        d.ellipse((x - r, row_y - r, x + r, row_y + r), fill="white", outline="black", width=7)
+        d.text((x, row_y + 2), label, font=big, fill="black", anchor="mm")
+    # labels
+    outlined((xs[-1] - r - 20, row_y), "RAs", big, anchor="rm")
+    outlined((xs[2], col_bottom + 60), "RAs face the dorm, 10 ft apart", med, anchor="mm")
+    outlined((xs[2], col_bottom + 108), "Students line up behind their RA", med, anchor="mm")
     im.save(dst, quality=90)
     return im.size
 
@@ -678,8 +861,8 @@ def fire_pdf(path, aerial_src):
         "Go to the nearest fire exit. Every floor has a fire door at each end of the hallway. Use the one closest to you. From the main floor the lobby doors are also an exit.",
         "Walk. Do not run, push or talk. Keep your phone away so you can hear instructions.",
         "Smoke: stay low and cover your mouth. Before opening a closed door, feel it with the back of your hand. If it is hot, use the other exit.",
-        "Outside, move away from the building and go straight to the muster point: the parking lot across Kingsway College Dr, at the garbage can (see page 4).",
-        "Find your grade's RA and line up with your grade. Answer the roll call.",
+        "Outside, move away from the building and go straight to the muster point: the parking lot across Kingsway College Dr, in front of the parking spaces by the garbage can (see page 4).",
+        "Find your grade's RA and line up behind them. Grade 9 is at the garbage can, then 10, 11, 12, 12 to the left as you face the dorm. Answer the roll call.",
         "Stay at the muster point. Nobody goes back into the building until the Dean gives the all-clear.",
         "If you think someone is still inside, tell your RA or the Dean. Never go back in to look.",
     ]
@@ -687,7 +870,7 @@ def fire_pdf(path, aerial_src):
     y -= 14
     c.setFont(FB, 12); c.drawString(M, y, "Who does what"); y -= 12
     rows = [
-        ("RAs", "Go straight outside to your grade's designated spot. Line up your grade, take the roll against your floor list, and report the count (and any missing name) to the Head RA. Keep your grade together and quiet until the all-clear."),
+        ("RAs", "Go straight outside to your grade's spot in front of the parking spaces, facing the dorm. Line your grade up behind you, take the roll against your floor list, and report the count (and any missing name) to the Head RA. Keep your grade together and quiet until the all-clear."),
         ("Head RA", "Sweep the building with the Deans: every room, washroom and common area on all three floors. Exit last. At the muster point, collect the counts from the five RAs and report \"all clear\" or the missing names to the Dean."),
         ("Deans", "Lead the drill. Sweep the floors with the Head RA, meet the fire department if it is a real alarm, decide when the all-clear is given, and account for every person using the RAs' counts."),
         ("Monitors", "If you are at the desk: bring the visitor sign-in sheet with you, leave by the lobby, and report to the Dean at the muster point who was signed in. Visitors line up with the Monitor."),
@@ -730,8 +913,8 @@ def fire_pdf(path, aerial_src):
     cols = [
         [Node("step", "Alarm sounds"),
          Node("step", "Leave by the nearest fire door", items=["Do not sweep rooms. Your job is outside."]),
-         Node("step", "Go to your grade's spot", items=["Garbage can first: Grade 9, then 10, 11, 12, 12."]),
-         Node("step", "Line up your grade and take the roll", items=["Check against your floor list."]),
+         Node("step", "Go to your grade's spot", items=["In front of the parking spaces, facing the dorm. Grade 9 at the garbage can, then 10, 11, 12, 12 to the left."]),
+         Node("step", "Line your grade up behind you and take the roll", items=["Check against your floor list."]),
          Node("step", "Report the count to the Head RA", items=["Name anyone missing and where they were last seen."]),
          Node("step", "Hold your grade at the spot", items=["Quiet, together, until the all-clear."])],
         [Node("step", "Alarm sounds"),
@@ -744,7 +927,7 @@ def fire_pdf(path, aerial_src):
         [Node("step", "Alarm sounds"),
          Node("step", "Leave at once by the nearest fire door", items=["Close your door. Walk. No belongings."]),
          Node("step", "Cross to the parking lot"),
-         Node("step", "Find your grade's RA and line up"),
+         Node("step", "Find your grade's RA and line up behind them"),
          Node("step", "Answer the roll call"),
          Node("step", "Wait for the all-clear", items=["Nobody re-enters until the Dean says so."])],
     ]
@@ -843,9 +1026,9 @@ def fire_pdf(path, aerial_src):
     header(c, "Muster point: the lot across the road", K, 4, total)
     y = PAGE_H - M - 50
     intro = ("Aerial view of Ryan Hall and the parking lot across Kingsway College Dr. The garbage can at the end of "
-             "the parked-car row is the anchor. The five RAs stand in a line starting at the can and running away "
-             "from the trees into the open lot, about 10 feet apart, in grade order. Each grade lines up in a single "
-             "line beside its RA, toward the wide open part of the lot. Nobody stands in the parking stalls or on the road.")
+             "the parking spaces is the anchor. The five RAs stand in a row in front of the parking spaces, facing the "
+             "dorm, about 10 feet apart: Grade 9 at the can, then 10, 11, 12 and 12 to the left. Each grade lines up "
+             "behind its RA, away from the dorm. Nobody stands in the parking stalls or on the road.")
     y = text_block(c, M, y, PAGE_W - 2 * M, simpleSplit(intro, F, 9.5, PAGE_W - 2 * M), F, 9.5, 12) - 10
     avail_h = y - (M + 26)
     scale = min((PAGE_W - 2 * M - 150) / img_w, avail_h / img_h)
@@ -860,8 +1043,8 @@ def fire_pdf(path, aerial_src):
     items = [
         ("route", "Walking route from the front entrance, across the road, to the muster point"),
         ("can", "Garbage can: the muster point anchor. Grade 9 lines up here."),
-        ("circle", "RA position. The number is the grade the RA is responsible for."),
-        ("line", "Where that grade's students line up: a single line beside their RA, running into the open lot"),
+        ("circle", "RA position, facing the dorm. The number is the grade the RA is responsible for."),
+        ("line", "Where that grade's students line up: a single line behind their RA, away from the dorm"),
     ]
     lw = PAGE_W - M - lx
     for kind, desc in items:
@@ -880,69 +1063,74 @@ def fire_pdf(path, aerial_src):
         text_block(c, lx + 32, ly, lw - 34, lines, F, 8.5, 10.5)
         ly -= max(len(lines) * 10.5, 14) + 10
     ly -= 6
-    c.setFont(FB, 9); c.drawString(lx, ly, "Order from the can"); ly -= 14
-    for g in ["1.  Grade 9 RA", "2.  Grade 10 RA", "3.  Grade 11 RA", "4.  Grade 12 RA (A)", "5.  Grade 12 RA (B)"]:
+    c.setFont(FB, 9); c.drawString(lx, ly, "Order from the can, going left"); ly -= 14
+    for g in ["1.  Grade 9 RA (at the can)", "2.  Grade 10 RA", "3.  Grade 11 RA", "4.  Grade 12 RA (A)", "5.  Grade 12 RA (B)"]:
         c.setFont(F, 9); c.drawString(lx + 4, ly, g); ly -= 13
     ly -= 8
-    note = ("The photo was taken on a different day; cars will not be where they are shown. The garbage can and the "
-            "tree line are the landmarks. Map imagery: Google.")
+    note = ("\"Left\" means left as you stand in the lot facing the dorm. The photo was taken on a different day; cars "
+            "will not be where they are shown. The garbage can and the parking spaces are the landmarks. Map imagery: Google.")
     text_block(c, lx, ly, lw, simpleSplit(note, FI, 7.5, lw), FI, 7.5, 9.5)
     c.showPage()
 
     # ---- page 5: lineup schematic + RA assignments
     header(c, "Grade lineup at the muster point", K, 5, total)
     y = PAGE_H - M - 50
-    intro = ("Not to scale. The parked-car row and the trees are at the top; the open lot is below and to the left. "
-             "The RAs form a straight line out from the garbage can, spaced out so the grade lines do not mix. "
-             "Students stand in a single line beside their RA, facing the RA, so the roll can be taken quickly.")
+    intro = ("Not to scale. You are looking down at the lot with the dorm at the top. The RAs stand in a row in front "
+             "of the parking spaces, facing the dorm, about 10 feet apart: Grade 9 at the garbage can and the rest to the "
+             "left. Each grade stands in a single line behind its RA, so the RA turns around and takes the roll down the line.")
     y = text_block(c, M, y, PAGE_W - 2 * M, simpleSplit(intro, F, 9.5, PAGE_W - 2 * M), F, 9.5, 12) - 14
     # schematic frame
     fx, fw = M, PAGE_W - 2 * M
     fh = 330
     c.setLineWidth(1); c.rect(fx, y - fh, fw, fh, stroke=1, fill=0)
-    # tree line + road hint at top
-    c.setFont(FI, 8); c.drawString(fx + 6, y - 11, "Kingsway College Dr  /  tree line  (Ryan Hall is on the far side of the road)")
+    # dorm, road and tree line hint at top
+    c.setFont(FB, 8); c.drawCentredString(fx + fw / 2, y - 11, "RYAN HALL (across Kingsway College Dr)")
     c.setLineWidth(0.8)
     for k in range(0, int(fw), 14):
         c.circle(fx + k + 8, y - 24, 4, stroke=1, fill=0)
+    c.setFont(FI, 7); c.drawString(fx + 6, y - 36, "tree line")
     # parking stalls along the tree line
-    sx0, stall_w, stall_h = fx + 10, 26, 44
+    sx0, stall_w, stall_h = fx + 10, 30, 40
     c.setFont(F, 7)
     for k in range(13):
         sx = sx0 + k * stall_w
-        c.rect(sx, y - 34 - stall_h, stall_w, stall_h, stroke=1, fill=0)
-    c.drawString(sx0 + 2, y - 34 - stall_h - 9, "parking stalls (do not stand here)")
+        c.rect(sx, y - 40 - stall_h, stall_w, stall_h, stroke=1, fill=0)
+    c.drawString(sx0 + 2, y - 40 - stall_h - 9, "parking stalls (do not stand here)")
     # garbage can right after the stalls
-    gx = sx0 + 13 * stall_w + 18
-    gy = y - 34 - stall_h / 2
+    gx = sx0 + 13 * stall_w + 16
+    gy = y - 40 - stall_h / 2
     c.setFillColorRGB(*BLACK); c.rect(gx - 7, gy - 7, 14, 14, stroke=0, fill=1); c.setFillColorRGB(*BLACK)
-    c.setFont(FB, 8); c.drawString(gx + 12, gy - 3, "GARBAGE CAN (anchor)")
-    # RA positions down from the can
-    c.setLineWidth(1); c.setDash([3, 3]); c.line(gx, gy + 10, gx, y - fh + 20); c.setDash([])
-    grades = [("9", "Grade 9 RA"), ("10", "Grade 10 RA"), ("11", "Grade 11 RA"), ("12", "Grade 12 RA (A)"), ("12", "Grade 12 RA (B)")]
-    py = gy - 44
-    for i, (g, name) in enumerate(grades):
+    c.setFont(FB, 8); c.drawString(gx + 12, gy - 3, "GARBAGE CAN"); c.setFont(F, 7.5); c.drawString(gx + 12, gy - 13, "(anchor)")
+    # RA row in front of the stalls, Grade 9 under the can, the rest to the left
+    row_y = y - 40 - stall_h - 34
+    spacing = 70
+    grades = [("9", "Grade 9"), ("10", "Grade 10"), ("11", "Grade 11"), ("12", "Grade 12 (A)"), ("12", "Grade 12 (B)")]
+    xs = [gx - i * spacing for i in range(5)]
+    c.setLineWidth(1); c.setDash([3, 3]); c.line(gx, gy + 7, gx, row_y + 12); c.line(xs[-1], row_y, xs[0], row_y); c.setDash([])
+    # "facing the dorm" arrow
+    arrow(c, xs[-1] - 46, row_y - 10, xs[-1] - 46, row_y + 26)
+    c.setFont(FI, 7); c.drawCentredString(xs[-1] - 46, row_y - 20, "RAs face"); c.drawCentredString(xs[-1] - 46, row_y - 29, "the dorm")
+    for i, (x, (g, name)) in enumerate(zip(xs, grades)):
+        # the grade's students in a single line behind the RA
+        for k in range(9):
+            sy = row_y - 30 - k * 16
+            c.setLineWidth(0.7); c.rect(x - 4, sy - 4, 8, 8, stroke=1, fill=0)
         c.setLineWidth(1.5); c.setFillColorRGB(*WHITE)
-        c.circle(gx, py, 12, stroke=1, fill=1)
+        c.circle(x, row_y, 12, stroke=1, fill=1)
         c.setFillColorRGB(*BLACK)
-        c.setFont(FB, 10); c.drawCentredString(gx, py - 3.5, g)
-        c.setFont(FB, 8); c.drawString(gx + 18, py - 3, name)
-        # student line: small squares running left from the RA into the open lot
-        for k in range(14):
-            sqx = gx - 24 - 8 - k * 15
-            c.setLineWidth(0.7); c.rect(sqx, py - 4, 8, 8, stroke=1, fill=0)
-        c.setFont(FI, 7.5); c.drawRightString(gx - 24 - 8 - 13 * 15 - 6, py - 3, f"grade {g} students, single line")
+        c.setFont(FB, 10); c.drawCentredString(x, row_y - 3.5, g)
+        c.setFont(FB, 7.5); c.drawCentredString(x, row_y - 30 - 9 * 16 + 2, name)
+        c.setFont(F, 7); c.drawCentredString(x, row_y - 30 - 9 * 16 - 8, "students")
         if i < 4:
-            c.setFont(FI, 7); c.drawString(gx + 4, py - 32, "about 10 ft")
-        py -= 50
-    c.setFont(F, 8); c.drawString(fx + 6, y - fh + 8, "open parking lot")
+            c.setFont(FI, 7); c.drawCentredString((x + xs[i + 1]) / 2, row_y + 16, "10 ft")
+    c.setFont(F, 8); c.drawString(fx + 6, y - fh + 8, "open parking lot (rest of the lot)")
     # RA assignment table
     ty = y - fh - 22
     c.setFont(FB, 10.5); c.drawString(M, ty, "RA positions this year (fill in, post on the monitor desk)"); ty -= 10
     c.setLineWidth(0.6)
     heads = ["Position", "Grade", "RA name", "Floor they cover", "Backup if that RA is away"]
     cw = [52, 44, 150, 110, PAGE_W - 2 * M - 356]
-    rows2 = [("1 (at can)", "9"), ("2", "10"), ("3", "11"), ("4", "12"), ("5", "12")]
+    rows2 = [("1 (at can)", "9"), ("2 (left)", "10"), ("3", "11"), ("4", "12"), ("5 (far left)", "12")]
     rh = 20
     x = M
     c.setFillColorRGB(*BLACK); c.rect(M, ty - rh, PAGE_W - 2 * M, rh, stroke=0, fill=1); c.setFillColorRGB(*WHITE)
